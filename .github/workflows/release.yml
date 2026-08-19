@@ -44,7 +44,7 @@ jobs:
                       arch: x64
                     - os: ubuntu-24.04-arm
                       arch: arm64
-                    - os: windows-latest
+                    - os: windows-2022
                       arch: x64
                     - os: windows-11-arm
                       arch: arm64
@@ -306,7 +306,7 @@ jobs:
 
             - name: Merge Windows latest.yml (x64 + arm64)
               run: |
-                  X64_YML="windows-latest-x64/latest.yml"
+                  X64_YML="windows-2022-x64/latest.yml"
                   ARM_YML="windows-11-arm-arm64/latest.yml"
 
                   if [ -f "$X64_YML" ] && [ -f "$ARM_YML" ]; then
