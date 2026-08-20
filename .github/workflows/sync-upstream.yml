@@ -35,7 +35,7 @@ jobs:
 
             - name: Fast-forward main to upstream
               run: |
-                  git checkout main
+                  git checkout -B main origin/main
                   if ! git merge --ff-only upstream/main; then
                     echo "::error::'main' has diverged from upstream and cannot be fast-forwarded. Keep 'main' a plain mirror of open-webui/desktop and put your own commits on a feature branch."
                     exit 1
