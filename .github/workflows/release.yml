@@ -4,6 +4,11 @@ on:
     push:
         branches:
             - release
+    workflow_dispatch:
+
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
     compile:
@@ -199,7 +204,7 @@ jobs:
                   if-no-files-found: warn
 
     release:
-        name: Create GitHub Release
+        name: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         needs: package
         if: >-
             github.event_name == 'push' &&
