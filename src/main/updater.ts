@@ -14,6 +14,7 @@ export function initUpdater(window: BrowserWindow): void {
   autoUpdater.logger = log
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.allowPrerelease = true
 
   autoUpdater.on('checking-for-update', () => {
     send('update:checking')
