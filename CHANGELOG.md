@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.21] - 2026-08-20
+
+### Added
+
+- **Optional OmniRoute Autostart on Windows.** Open WebUI Desktop can start an existing global OmniRoute installation when the setting is enabled, avoid duplicate starts, and provide an OmniRoute tray icon with dashboard and stop controls.
+
+### Fixed
+
+- **OmniRoute Opens a Terminal Window.** OmniRoute is now launched without a detached Windows console, so enabling autostart no longer opens a persistent terminal tab.
+- **OmniRoute Cannot Be Stopped.** Intentional `omniroute stop` requests no longer trigger the OmniRoute supervisor to restart the server.
+- **OmniRoute Startup Can Crash Electron.** Readiness request errors such as `socket hang up` are handled without becoming uncaught exceptions in the Electron main process.
+- **Missing OmniRoute Tray Icon after Slow Startup.** The tray icon is managed by Electron after the bounded readiness check instead of relying on OmniRoute's shorter internal tray timeout.
+
 ## [0.0.20] - 2026-05-07
 
 ### Fixed
