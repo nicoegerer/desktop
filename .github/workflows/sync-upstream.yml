@@ -31,7 +31,7 @@ jobs:
             - name: Fetch upstream
               run: |
                   git remote add upstream https://github.com/open-webui/desktop.git
-                  git fetch upstream main
+                  git fetch upstream main release
 
             - name: Fast-forward main to upstream
               run: |
@@ -42,13 +42,13 @@ jobs:
                   fi
                   git push origin main
 
-            - name: Merge main into release
+            - name: Merge upstream release into our release
               id: merge
               run: |
                   git checkout release
                   BEFORE=$(git rev-parse HEAD)
 
-                  if ! git merge --no-edit main; then
+                  if ! git merge --no-edit upstream/release; then
                     git merge --abort
                     echo "::error::Upstream conflicts with this fork's changes. Open a pull request from 'main' into 'release' and resolve it there (keep 'owner: nicoegerer' in electron-builder.yml)."
                     exit 1
