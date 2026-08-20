@@ -410,7 +410,7 @@ jobs:
                   name: v${{ steps.version.outputs.version }}
                   body_path: /tmp/release_notes.md
                   draft: false
-                  prerelease: false
+                  prerelease: ${{ contains(steps.version.outputs.version, '-') }}
                   files: |
                       windows-*-*/*.exe
                       windows-*-*/*.blockmap
