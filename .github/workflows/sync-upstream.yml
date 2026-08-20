@@ -1,0 +1,74 @@
+name: Sync Upstream into Release
+
+on:
+    workflow_dispatch:
+    schedule:
+        # Mondays, 06:00 UTC
+        - cron: '0 6 * * 1'
+
+permissions:
+    contents: write
+    actions: write
+
+concurrency:
+    group: sync-upstream
+
+jobs:
+    sync:
+        name: Merge open-webui/desktop into release
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Configure git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            - name: Fetch upstream
+              run: |
+                  git remote add upstream https://github.com/open-webui/desktop.git
+                  git fetch upstream main
+
+            - name: Fast-forward main to upstream
+              run: |
+                  git checkout main
+                  if ! git merge --ff-only upstream/main; then
+                    echo "::error::'main' has diverged from upstream and cannot be fast-forwarded. Keep 'main' a plain mirror of open-webui/desktop and put your own commits on a feature branch."
+                    exit 1
+                  fi
+                  git push origin main
+
+            - name: Merge main into release
+              id: merge
+              run: |
+                  git checkout release
+                  BEFORE=$(git rev-parse HEAD)
+
+                  if ! git merge --no-edit main; then
+                    git merge --abort
+                    echo "::error::Upstream conflicts with this fork's changes. Open a pull request from 'main' into 'release' and resolve it there (keep 'owner: nicoegerer' in electron-builder.yml)."
+                    exit 1
+                  fi
+
+                  AFTER=$(git rev-parse HEAD)
+                  if [ "$BEFORE" = "$AFTER" ]; then
+                    echo "Already up to date with upstream — nothing to release."
+                    echo "changed=false" >> $GITHUB_OUTPUT
+                    exit 0
+                  fi
+
+                  git push origin release
+                  echo "changed=true" >> $GITHUB_OUTPUT
+                  echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+            - name: Trigger release build
+              if: steps.merge.outputs.changed == 'true'
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  echo "Releasing version ${{ steps.merge.outputs.version }}"
+                  gh workflow run release.yml --ref release
