@@ -1,4 +1,4 @@
 provider: github
-owner: open-webui
+owner: nicoegerer
 repo: desktop
 updaterCacheDirName: desktop-updater
