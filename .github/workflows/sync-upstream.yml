@@ -71,4 +71,4 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   echo "Releasing version ${{ steps.merge.outputs.version }}"
-                  gh workflow run release.yml --ref release
+                  gh workflow run release.yml --ref release --repo "$GITHUB_REPOSITORY"
