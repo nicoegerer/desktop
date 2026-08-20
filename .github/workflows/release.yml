@@ -204,10 +204,10 @@ jobs:
                   if-no-files-found: warn
 
     release:
-        name: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+        name: Create GitHub Release
         needs: package
         if: >-
-            github.event_name == 'push' &&
+            (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
             github.ref == 'refs/heads/release' &&
             !cancelled() &&
             needs.package.result != 'failure'
