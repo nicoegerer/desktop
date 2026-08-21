@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.22-omniroute.1] - 2026-08-21
+
+Fork prerelease based on the official Open WebUI Desktop v0.0.20 source. It supersedes the fixed OmniRoute autostart with an extensible local managed-services registry.
+
+### Added
+
+- **Generic managed background services.** Any local command can be configured, started without blocking app startup, monitored through a health endpoint, restarted with bounded exponential backoff, and stopped as a complete process tree on app quit.
+- **First-class mcpo services.** Adding an MCP stdio server now requires only its executable, arguments, and port. The app derives the absolute `uvx`/mcpo command, generates an encrypted bearer key, and shows the Open WebUI external-tool URL and key with copy actions.
+- **Dynamic settings and status display.** Services can be added, edited, enabled, started, stopped, removed, and inspected through a 500-line log buffer. The existing bottom status bar lists registry services dynamically and summarizes overflow as `+N`.
+- **Safe registry transfer.** JSON import/export omits secret values, previews every imported command for confirmation, and regenerates mcpo bearer keys.
+
+### Changed
+
+- Existing OmniRoute autostart preferences migrate automatically into the versioned registry. A disabled Garmin MCP example is included without assuming user-specific activation.
+- Service secrets and environment values use Electron `safeStorage`. Systems without OS encryption receive an explicit warning and a local file fallback that is kept out of config logging.
+- Fork versioning advances to `0.0.22-omniroute.1`, avoiding a collision with the forthcoming official `v0.0.21` while remaining on the installed `omniroute` update channel.
+
 ## [0.0.21-omniroute.1] - 2026-08-20
 
 Fork prerelease based on the official Open WebUI Desktop v0.0.20 source plus the optional OmniRoute integration.

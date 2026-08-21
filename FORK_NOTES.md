@@ -23,6 +23,16 @@ No upstream server database, migration, Python, or Open WebUI connection code is
 
 The old fork-only `src/main/utils/omniroute.ts`, fixed `omniRoute` config field, toggle markup, and OmniRoute translation keys were removed. Those files therefore match `upstream/main` again and should not create future merge conflicts.
 
+## Release-only upstream files
+
+| File | Lines | Reason |
+| --- | ---: | --- |
+| `package.json` | 3 | Fork release version `0.0.22-omniroute.1`. |
+| `package-lock.json` | 3, 9 | Keep the root package and lockfile release versions aligned. |
+| `CHANGELOG.md` | 8-23 | Release notes consumed by the existing GitHub Actions release workflow. |
+
+The `release` branch already carries the fork updater feed (`nicoegerer/desktop`) and `autoUpdater.allowPrerelease = true` from `v0.0.21-omniroute.1`; those settings are preserved so installed fork builds can receive this release.
+
 ## Extension rule
 
 Adding another generic service or MCP server is a registry-data operation. It must not require a source-file change. Names and commands specific to bundled examples belong only in `src/main/services/defaults.ts`.
