@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.22-services.1] - 2026-08-21
+
+This release turns the earlier OmniRoute-specific fork into a public, provider-neutral Services
+Edition while preserving the existing in-app update feed.
+
+### Added
+
+- **Services & Connectors hub.** A dedicated settings area manages local processes, MCP-to-OpenAPI
+  adapters, and existing remote HTTP(S) tool endpoints without shipping personal accounts.
+- **Remote endpoint adapter.** External tool servers can be stored with an optional encrypted bearer
+  token and copied into Open WebUI integration settings.
+- **Integrated service console.** Clicking a managed service in the bottom status bar now opens the
+  same resizable bottom log area used by Open WebUI, Open Terminal, and llama.cpp.
+
+### Fixed
+
+- **Windows `uvx` discovery.** mcpo launch no longer assumes `%USERPROFILE%\\.local\\bin\\uvx.exe`.
+  The app resolves `uvx` from `PATH`, WinGet, and installed Python Scripts folders or accepts an
+  explicit runner path. mcpo launches now include `--refresh`.
+
+### Changed
+
+- New installations start with an empty registry. Existing saved services remain local, and only an
+  actually enabled legacy OmniRoute preference is migrated.
+- The public branch model keeps `main` as an upstream mirror, carries the feature on
+  `managed-services`, and republishes successful upstream merges from `release` with collision-safe
+  `services` versions.
+
 ## [0.0.22-omniroute.1] - 2026-08-21
 
 Fork prerelease based on the official Open WebUI Desktop v0.0.20 source. It supersedes the fixed OmniRoute autostart with an extensible local managed-services registry.
