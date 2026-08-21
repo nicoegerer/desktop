@@ -126,6 +126,7 @@
   "settings.tabs.inference": "추론 런타임",
   "settings.tabs.models": "모델",
   "settings.tabs.connections": "연결",
+  "settings.tabs.services": "서비스 및 커넥터",
   "settings.tabs.about": "정보",
   "settings.general.defaultConnection": "기본 연결",
   "settings.general.defaultConnectionDesc": "실행 시 사용할 연결",

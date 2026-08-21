@@ -126,6 +126,7 @@
   "settings.tabs.inference": "推理运行时",
   "settings.tabs.models": "模型",
   "settings.tabs.connections": "连接",
+  "settings.tabs.services": "服务与连接器",
   "settings.tabs.about": "关于",
   "settings.general.defaultConnection": "默认连接",
   "settings.general.defaultConnectionDesc": "启动时使用的连接",

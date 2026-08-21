@@ -112,7 +112,7 @@ export const registerManagedServicesIpc = (
             commandPreview: manager.registry.commandPreview(service)
           })),
           warnings: [
-            'Environment variable values are not imported and must be entered again.',
+            'Environment values and remote access tokens are not imported and must be entered again.',
             'New bearer keys are generated for every imported mcpo service.'
           ]
         }

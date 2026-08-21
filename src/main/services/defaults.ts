@@ -1,4 +1,3 @@
-import { homedir } from 'os'
 import { join } from 'path'
 
 import {
@@ -9,15 +8,13 @@ import {
 const DEFAULT_RESTART_LIMIT = 3
 const DEFAULT_STARTUP_TIMEOUT_MS = 120_000
 
-const getUvxPath = (): string =>
-  join(homedir(), '.local', 'bin', process.platform === 'win32' ? 'uvx.exe' : 'uvx')
-
 const createMcpoArgs = (
   host: string,
   port: number,
   serverCommand: string,
   serverArgs: string[]
 ): string[] => [
+  '--refresh',
   '--with',
   'mcp==1.9.4',
   'mcpo',
@@ -40,7 +37,7 @@ export const materializeMcpoService = (
   const host = '127.0.0.1'
   return {
     ...service,
-    command: getUvxPath(),
+    command: service.mcpo.runnerCommand?.trim() || 'uvx',
     args: createMcpoArgs(
       host,
       service.mcpo.port,
@@ -80,32 +77,6 @@ const createOmniRouteDefault = (enabled: boolean): ManagedServiceDefinition => {
   }
 }
 
-const createGarminDefault = (): ManagedServiceDefinition => {
-  const serverCommand = join(
-    homedir(),
-    '.local',
-    'bin',
-    process.platform === 'win32' ? 'garmin-mcp.exe' : 'garmin-mcp'
-  )
-
-  return materializeMcpoService({
-    id: 'garmin-mcp',
-    name: 'Garmin MCP',
-    type: 'mcpo',
-    command: '',
-    args: [],
-    enabled: false,
-    autoRestart: true,
-    restartLimit: DEFAULT_RESTART_LIMIT,
-    startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS,
-    mcpo: {
-      serverCommand,
-      serverArgs: [],
-      port: 8000
-    }
-  })
-}
-
 export const readLegacyAutostartEnabled = (config: unknown): boolean => {
   if (!config || typeof config !== 'object') return false
   const value = config as Record<string, unknown>
@@ -121,7 +92,5 @@ export const readLegacyAutostartEnabled = (config: unknown): boolean => {
   )
 }
 
-export const createDefaultServices = (legacyEnabled: boolean): ManagedServiceDefinition[] => [
-  createOmniRouteDefault(legacyEnabled),
-  createGarminDefault()
-]
+export const createDefaultServices = (legacyEnabled: boolean): ManagedServiceDefinition[] =>
+  legacyEnabled ? [createOmniRouteDefault(true)] : []

@@ -126,6 +126,7 @@
   "settings.tabs.inference": "Inferenz-Laufzeit",
   "settings.tabs.models": "Modelle",
   "settings.tabs.connections": "Verbindungen",
+  "settings.tabs.services": "Dienste & Konnektoren",
   "settings.tabs.about": "Über",
   "settings.general.defaultConnection": "Standardverbindung",
   "settings.general.defaultConnectionDesc": "Verbindung beim Start",

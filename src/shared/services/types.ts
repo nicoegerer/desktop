@@ -1,13 +1,18 @@
-export const MANAGED_SERVICES_SCHEMA_VERSION = 1
+export const MANAGED_SERVICES_SCHEMA_VERSION = 2
 export const MCPO_API_KEY_PLACEHOLDER = '{{MCPO_API_KEY}}'
 
-export type ManagedServiceType = 'generic' | 'mcpo'
+export type ManagedServiceType = 'generic' | 'mcpo' | 'remote'
 export type ManagedServiceStatus = 'stopped' | 'starting' | 'running' | 'failed'
 
 export interface McpoServiceOptions {
   serverCommand: string
   serverArgs: string[]
   port: number
+  runnerCommand?: string
+}
+
+export interface RemoteServiceOptions {
+  url: string
 }
 
 export interface ManagedServiceDefinition {
@@ -24,6 +29,8 @@ export interface ManagedServiceDefinition {
   restartLimit: number
   startupTimeoutMs: number
   mcpo?: McpoServiceOptions
+  remote?: RemoteServiceOptions
+  accessToken?: string
 }
 
 export interface ManagedServiceSnapshot extends ManagedServiceDefinition {

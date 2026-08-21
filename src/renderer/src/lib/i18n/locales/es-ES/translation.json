@@ -126,6 +126,7 @@
   "settings.tabs.inference": "Motor de inferencia",
   "settings.tabs.models": "Modelos",
   "settings.tabs.connections": "Conexiones",
+  "settings.tabs.services": "Servicios y conectores",
   "settings.tabs.about": "Acerca de",
   "settings.general.defaultConnection": "Conexión predeterminada",
   "settings.general.defaultConnectionDesc": "Conexión utilizada al inicio",

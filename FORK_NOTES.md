@@ -1,42 +1,50 @@
-# Fork merge notes
+# Managed Services fork notes
 
-This file records the intentionally small integration surface between the managed-services feature and `upstream/main`.
+This fork adds a public, provider-neutral services and connectors layer to Open WebUI Desktop.
+It does not ship personal service definitions, credentials, or provider accounts.
 
-## Upstream files touched
+## Branch model
 
-| File | Lines | Reason |
-| --- | ---: | --- |
-| `src/main/index.ts` | 85, 1212 | Import and asynchronously initialize the isolated service registry after Electron is ready. All lifecycle, IPC, and process logic lives under `src/main/services/`. |
-| `src/preload/index.ts` | 3, 77 | Import and spread the isolated, allow-listed managed-services preload API. |
-| `src/renderer/src/lib/components/Main/Connections/StatusBar.svelte` | 6, 180 | Mount the dynamic managed-services status component inside the existing bottom status bar. |
-| `src/renderer/src/lib/components/Main/Settings/General.svelte` | 6, 420 | Mount the isolated managed-services settings section where the previous fork-only OmniRoute toggle appeared. |
+| Branch | Purpose |
+| --- | --- |
+| `main` | Fast-forward mirror of `open-webui/desktop:main`; no fork-only commits. |
+| `managed-services` | Long-lived public feature branch. Official upstream changes are merged here. |
+| `release` | Packaging branch with the fork update feed and monotonically increasing `services` versions. |
 
-No upstream server database, migration, Python, or Open WebUI connection code is changed.
+The scheduled `sync-upstream.yml` workflow updates `main`, merges upstream into
+`managed-services`, merges that result into `release`, increments the fork prerelease version,
+and lets `release.yml` publish installers. Conflicts stop the workflow instead of discarding fork
+or upstream changes.
 
-## Fork-only files
+## Supported connector types
 
-- `src/main/services/`: versioned registry persistence, legacy migration, encrypted secrets, validation, IPC, health and port checks, cross-platform process-tree lifecycle, bounded restarts, and log ring buffers.
-- `src/preload/services.ts`: renderer-facing allow-list for managed-services IPC.
-- `src/shared/services/types.ts`: shared data and IPC types.
-- `src/renderer/src/lib/components/Main/Settings/Services.svelte`: dynamic service list and editor, import confirmation, export, logs, and mcpo integration details.
-- `src/renderer/src/lib/services/`: status-bar and log-view components.
+- **Local process** — any executable plus arguments, working directory, environment, optional
+  localhost health check, restart policy, and bounded logs.
+- **MCP → OpenAPI** — a local MCP stdio server wrapped with `mcpo`. The `uvx` runner is resolved
+  from `PATH`, common Windows Python locations, or an explicit override.
+- **Remote endpoint** — an existing HTTP(S) external tool server with an optional encrypted bearer
+  token. Provider-specific OAuth still belongs in a provider adapter or backend.
 
-The old fork-only `src/main/utils/omniroute.ts`, fixed `omniRoute` config field, toggle markup, and OmniRoute translation keys were removed. Those files therefore match `upstream/main` again and should not create future merge conflicts.
+New installations start with an empty registry. An existing enabled OmniRoute autostart setting is
+migrated once for backward compatibility. Existing saved services remain local to the user.
 
-## Release-only upstream files
+## Upstream integration surface
 
-| File | Lines | Reason |
-| --- | ---: | --- |
-| `package.json` | 3 | Fork release version `0.0.22-omniroute.1`. |
-| `package-lock.json` | 3, 9 | Keep the root package and lockfile release versions aligned. |
-| `CHANGELOG.md` | 8-23 | Release notes consumed by the existing GitHub Actions release workflow. |
+The fork keeps changes outside upstream-owned code where practical:
 
-The `release` branch already carries the fork updater feed (`nicoegerer/desktop`) and `autoUpdater.allowPrerelease = true` from `v0.0.21-omniroute.1`; those settings are preserved so installed fork builds can receive this release.
+- `src/main/services/` contains registry persistence, executable discovery, validation, health
+  checks, process lifecycle, encrypted secrets, IPC, imports/exports, and log buffers.
+- `src/shared/services/` contains versioned shared types.
+- `src/preload/services.ts` exposes an allow-listed renderer API.
+- `src/renderer/src/lib/components/Main/Settings/Services.svelte` is the connector hub.
+- `src/renderer/src/lib/services/` contains bottom-status and log-panel components.
 
-## Extension rule
+Small hooks remain in Electron startup, preload registration, Settings navigation, and the existing
+bottom status bar. No Open WebUI database or Python backend migration is introduced.
 
-Adding another generic service or MCP server is a registry-data operation. It must not require a source-file change. Names and commands specific to bundled examples belong only in `src/main/services/defaults.ts`.
+## Security boundaries
 
-## Release versioning
-
-Fork releases use the `omniroute` prerelease channel and a base version above the current upstream release (for this change: `v0.0.22-omniroute.1`). This avoids collision with upstream `v0.0.21` while keeping updates available to installations of `v0.0.21-omniroute.1` through the existing `nicoegerer/desktop` update feed.
+Service imports require a command preview and explicit confirmation. Exported registries omit
+environment values, generated mcpo keys, and remote access tokens. Secrets use Electron
+`safeStorage` where available. Processes always launch without a shell, and only processes started
+by the app are terminated by it.

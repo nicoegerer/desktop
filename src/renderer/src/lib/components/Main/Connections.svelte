@@ -8,6 +8,8 @@
   import Content from './Connections/Content.svelte'
   import StatusBar from './Connections/StatusBar.svelte'
   import LogPanel from './Connections/LogPanel.svelte'
+  import ManagedServiceLogPanel from '../../services/ManagedServiceLogPanel.svelte'
+  import type { ManagedServiceSnapshot } from '../../../../../shared/services/types'
 
   interface Props {
     onOpenSettings: () => void
@@ -45,6 +47,7 @@
 
   // Active log panel
   let activeLog = $state<'server' | 'open-terminal' | 'llama-server' | null>(null)
+  let activeManagedService = $state<ManagedServiceSnapshot | null>(null)
 
   const serverStatus = $derived($serverInfo?.status)
   const serverReachable = $derived($serverInfo?.reachable)
@@ -330,7 +333,13 @@
 
   // ── Status bar log selection ──────────────────────────
   const selectLog = (log: string) => {
+    activeManagedService = null
     activeLog = activeLog === log ? null : (log as typeof activeLog)
+  }
+
+  const selectManagedService = (service: ManagedServiceSnapshot) => {
+    activeLog = null
+    activeManagedService = activeManagedService?.id === service.id ? null : service
   }
 
   // ── Webview event delivery ─────────────────────────────
@@ -362,6 +371,16 @@
   // Listen for events from main process
   onMount(() => {
     window.electronAPI.onData((data: any) => {
+      if (data.type === 'managed-service:status' && data.data?.id === activeManagedService?.id) {
+        activeManagedService = data.data as ManagedServiceSnapshot
+      }
+      if (data.type === 'managed-services:changed' && activeManagedService && Array.isArray(data.data)) {
+        activeManagedService =
+          (data.data as ManagedServiceSnapshot[]).find(
+            (service) => service.id === activeManagedService?.id
+          ) ?? null
+      }
+
       // ── Connection opened (startup, tray click) ───────
       if (data.type === 'connection:open' && data.data?.url) {
         const connId = data.data.connectionId ?? ''
@@ -597,6 +616,11 @@
       onStop={activeLog === 'open-terminal' ? toggleOpenTerminal : activeLog === 'llama-server' ? toggleLlamaCpp : undefined}
       onClose={() => { activeLog = null; showingLogs = false }}
     />
+  {:else if activeManagedService}
+    <ManagedServiceLogPanel
+      service={activeManagedService}
+      onClose={() => (activeManagedService = null)}
+    />
   {/if}
 
   <StatusBar
@@ -608,7 +632,9 @@
     {openTerminalInstalled}
     llamaCppInstalled={!!llamaCppInfo?.binaryPath}
     {activeLog}
+    activeManagedServiceId={activeManagedService?.id ?? null}
     onSelectLog={selectLog}
+    onSelectManagedService={selectManagedService}
     onStartServer={async () => {
       if (!localInstalled) {
         // Not installed — trigger full install (handles Python/uv + package)
