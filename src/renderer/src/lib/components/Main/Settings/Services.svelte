@@ -17,6 +17,7 @@
   let loading = $state(true)
   let error = $state('')
   let editorOpen = $state(false)
+  let addMenuOpen = $state(false)
   let saving = $state(false)
   let draft = $state<ManagedServiceDefinition | null>(null)
   let argsText = $state('')
@@ -26,6 +27,8 @@
   let integrationName = $state('')
   let importPreview = $state<ManagedServiceImportPreview | null>(null)
   let unsubscribe: (() => void) | null = null
+  let filter = $state<'all' | 'running' | 'setup'>('all')
+  let query = $state('')
 
   const isGerman =
     typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('de')
@@ -51,10 +54,13 @@
     if (logService?.id === service.id) logService = service
   }
 
-  const emptyService = (port: number): ManagedServiceDefinition => ({
+  const emptyService = (
+    port: number,
+    type: ManagedServiceDefinition['type']
+  ): ManagedServiceDefinition => ({
     id: '',
     name: '',
-    type: 'mcpo',
+    type,
     command: '',
     args: [],
     enabled: false,
@@ -62,15 +68,20 @@
     restartLimit: 3,
     startupTimeoutMs: 120_000,
     env: {},
-    mcpo: { serverCommand: '', serverArgs: [], port }
+    mcpo:
+      type === 'mcpo'
+        ? { serverCommand: '', serverArgs: [], port, runnerCommand: 'uvx' }
+        : undefined,
+    remote: type === 'remote' ? { url: '' } : undefined
   })
 
-  const openAdd = async (): Promise<void> => {
+  const openAdd = async (type: ManagedServiceDefinition['type']): Promise<void> => {
     error = ''
     const port = await window.electronAPI.suggestManagedServicePort()
-    draft = emptyService(port)
+    draft = emptyService(port, type)
     argsText = ''
     envEntries = []
+    addMenuOpen = false
     editorOpen = true
   }
 
@@ -107,7 +118,27 @@
       await refreshMcpoPreview()
       if (!draft) return
       argsText = draft.args.join('\n')
-      draft = { ...draft, type: 'generic', mcpo: undefined }
+      draft = {
+        ...draft,
+        type: 'generic',
+        mcpo: undefined,
+        remote: undefined,
+        accessToken: undefined
+      }
+      return
+    }
+
+    if (nextType === 'remote') {
+      draft = {
+        ...draft,
+        type: 'remote',
+        command: '',
+        args: [],
+        mcpo: undefined,
+        remote: { url: draft.remote?.url ?? '' },
+        accessToken: draft.accessToken ?? ''
+      }
+      argsText = ''
       return
     }
 
@@ -116,7 +147,9 @@
     draft = {
       ...draft,
       type: 'mcpo',
-      mcpo: { serverCommand: draft.command, serverArgs, port }
+      remote: undefined,
+      accessToken: undefined,
+      mcpo: { serverCommand: draft.command, serverArgs, port, runnerCommand: 'uvx' }
     }
     argsText = serverArgs.join('\n')
     await refreshMcpoPreview()
@@ -153,6 +186,10 @@
       )
       return
     }
+    if (draft.type === 'remote' && !draft.remote?.url.trim()) {
+      error = l('Eine Remote-Endpunkt-URL ist erforderlich.', 'A remote endpoint URL is required.')
+      return
+    }
     if (assignedPortWarning()) {
       error = assignedPortWarning()
       return
@@ -168,8 +205,14 @@
       name: draft.name.trim(),
       env,
       ...(draft.type === 'generic'
-        ? { args: parsedArgs, mcpo: undefined }
-        : { mcpo: { ...draft.mcpo!, serverArgs: parsedArgs } })
+        ? { args: parsedArgs, mcpo: undefined, remote: undefined, accessToken: undefined }
+        : draft.type === 'mcpo'
+          ? {
+              mcpo: { ...draft.mcpo!, serverArgs: parsedArgs },
+              remote: undefined,
+              accessToken: undefined
+            }
+          : { command: '', args: [], mcpo: undefined })
     } as ManagedServiceDefinition
 
     saving = true
@@ -178,7 +221,7 @@
       updateStatus(saved)
       editorOpen = false
       draft = null
-      if (saved.type === 'mcpo') await showIntegration(saved)
+      if (saved.type === 'mcpo' || saved.type === 'remote') await showIntegration(saved)
       await refresh()
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause)
@@ -265,9 +308,10 @@
 
   const generatedCommand = (): string => {
     if (!draft || draft.type !== 'mcpo' || !draft.mcpo) return ''
-    const runner = draft.command || '%USERPROFILE%\\.local\\bin\\uvx.exe'
+    const runner = draft.mcpo.runnerCommand || draft.command || 'uvx'
     const parts = [
       runner,
+      '--refresh',
       '--with',
       'mcp==1.9.4',
       'mcpo',
@@ -282,6 +326,28 @@
       ...argsText.split(/\r?\n/).filter(Boolean)
     ]
     return parts.map((part) => (/\s/.test(part) ? JSON.stringify(part) : part)).join(' ')
+  }
+
+  const visibleServices = (): ManagedServiceSnapshot[] => {
+    const normalizedQuery = query.trim().toLowerCase()
+    return services.filter((service) => {
+      const matchesFilter =
+        filter === 'all' ||
+        (filter === 'running' && service.status === 'running') ||
+        (filter === 'setup' && (service.status === 'failed' || !service.enabled))
+      const matchesQuery =
+        !normalizedQuery ||
+        service.name.toLowerCase().includes(normalizedQuery) ||
+        service.type.toLowerCase().includes(normalizedQuery)
+      return matchesFilter && matchesQuery
+    })
+  }
+
+  const serviceDetail = (service: ManagedServiceSnapshot): string => {
+    if (service.lastError) return service.lastError
+    if (service.type === 'mcpo') return `MCP → http://127.0.0.1:${service.mcpo?.port ?? ''}`
+    if (service.type === 'remote') return service.remote?.url ?? ''
+    return [service.command, ...service.args].filter(Boolean).join(' ')
   }
 
   onMount(() => {
@@ -299,102 +365,191 @@
   onDestroy(() => unsubscribe?.())
 </script>
 
-<section class="py-4">
-  <div class="mb-3 flex items-start justify-between gap-3">
-    <div>
-      <div class="text-[13px] font-medium opacity-75">{l('Dienste', 'Managed services')}</div>
-      <div class="mt-0.5 text-[11px] opacity-30">
+<section class="py-2">
+  <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div class="max-w-xl">
+      <div class="text-[14px] font-medium opacity-80">
+        {l('Dienste & Konnektoren', 'Services & connectors')}
+      </div>
+      <div class="mt-1 text-[11px] leading-4 opacity-40">
         {l(
-          'Lokale Hintergrund-Dienste starten und überwachen',
-          'Start and monitor local background services'
+          'Lokale Prozesse, MCP-Adapter und externe Werkzeug-Endpunkte zentral verwalten.',
+          'Manage local processes, MCP adapters, and external tool endpoints in one place.'
         )}
       </div>
     </div>
-    <div class="flex shrink-0 gap-1">
+    <div class="flex shrink-0 gap-1.5">
       <button
-        class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 dark:hover:bg-white/10"
+        class="rounded-lg px-2.5 py-1.5 text-[10px] opacity-45 transition hover:bg-black/5 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
         onclick={() => window.electronAPI.exportManagedServices()}>{l('Export', 'Export')}</button
       >
       <button
-        class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 dark:hover:bg-white/10"
+        class="rounded-lg px-2.5 py-1.5 text-[10px] opacity-45 transition hover:bg-black/5 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
         onclick={previewImport}>{l('Import', 'Import')}</button
       >
-      <button
-        class="rounded-lg bg-black/[0.07] px-2.5 py-1 text-[10px] opacity-70 hover:opacity-100 dark:bg-white/[0.10]"
-        onclick={openAdd}>+ {l('Dienst', 'Service')}</button
-      >
+      <div class="relative">
+        <button
+          class="rounded-lg bg-[#1d1d1f] px-3 py-1.5 text-[10px] text-white transition hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 dark:bg-white dark:text-[#111]"
+          aria-expanded={addMenuOpen}
+          onclick={() => (addMenuOpen = !addMenuOpen)}>+ {l('Hinzufügen', 'Add')}</button
+        >
+        {#if addMenuOpen}
+          <div
+            class="absolute right-0 top-8 z-30 w-60 rounded-xl border border-black/10 bg-[#f8f8fa] p-1.5 shadow-xl dark:border-white/10 dark:bg-[#1b1b1d]"
+          >
+            {#each [['mcpo', 'MCP → OpenAPI', l('Lokalen MCP-Server über mcpo bereitstellen', 'Expose a local MCP server through mcpo')], ['generic', l('Lokaler Prozess', 'Local process'), l('Beliebiges Kommando starten und überwachen', 'Run and monitor any command')], ['remote', l('Remote-Endpunkt', 'Remote endpoint'), l('Vorhandenen HTTP(S)-Werkzeugserver verbinden', 'Connect an existing HTTP(S) tool server')]] as item (item[0])}
+              <button
+                class="block w-full rounded-lg px-2.5 py-2 text-left transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
+                onclick={() => openAdd(item[0] as ManagedServiceDefinition['type'])}
+              >
+                <span class="block text-[11px] font-medium opacity-75">{item[1]}</span>
+                <span class="mt-0.5 block text-[9px] opacity-35">{item[2]}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="mb-4 grid grid-cols-[1fr_auto_1fr_auto_1fr] items-center gap-2 rounded-xl border border-black/[0.06] bg-black/[0.018] px-3 py-2.5 dark:border-white/[0.07] dark:bg-white/[0.025]"
+    aria-label={l('Verbindungsroute', 'Connector route')}
+  >
+    <div class="min-w-0">
+      <div class="text-[9px] uppercase tracking-[0.14em] opacity-25">{l('Quelle', 'Source')}</div>
+      <div class="truncate text-[11px] opacity-65">MCP · CLI · HTTPS</div>
+    </div>
+    <div class="h-px w-8 bg-gradient-to-r from-transparent to-emerald-500/45"></div>
+    <div class="min-w-0 text-center">
+      <div class="text-[9px] uppercase tracking-[0.14em] opacity-25">Adapter</div>
+      <div class="truncate text-[11px] text-emerald-600/80 dark:text-emerald-300/80">Registry</div>
+    </div>
+    <div class="h-px w-8 bg-gradient-to-r from-emerald-500/45 to-transparent"></div>
+    <div class="min-w-0 text-right">
+      <div class="text-[9px] uppercase tracking-[0.14em] opacity-25">{l('Ziel', 'Target')}</div>
+      <div class="truncate text-[11px] opacity-65">Open WebUI</div>
     </div>
   </div>
 
   {#if error}
-    <div class="mb-2 rounded-lg bg-red-500/10 px-3 py-2 text-[11px] text-red-600 dark:text-red-300">
+    <div class="mb-3 rounded-lg bg-red-500/10 px-3 py-2 text-[11px] text-red-600 dark:text-red-300">
       {error}
     </div>
   {/if}
 
+  <div class="mb-2 flex flex-wrap items-center gap-2">
+    <div class="flex rounded-lg bg-black/[0.035] p-0.5 dark:bg-white/[0.05]">
+      {#each [['all', l('Alle', 'All')], ['running', l('Läuft', 'Running')], ['setup', l('Einrichtung nötig', 'Needs setup')]] as item (item[0])}
+        <button
+          class="rounded-md px-2.5 py-1 text-[10px] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 {filter ===
+          item[0]
+            ? 'bg-white opacity-75 shadow-sm dark:bg-white/10'
+            : 'opacity-35 hover:opacity-65'}"
+          onclick={() => (filter = item[0] as typeof filter)}>{item[1]}</button
+        >
+      {/each}
+    </div>
+    <label class="relative ml-auto min-w-40 flex-1 sm:max-w-64">
+      <span class="sr-only">{l('Dienste durchsuchen', 'Search services')}</span>
+      <input
+        class="w-full rounded-lg border border-black/[0.06] bg-transparent px-3 py-1.5 text-[10px] outline-none placeholder:opacity-30 focus:border-emerald-500/40 dark:border-white/[0.08]"
+        placeholder={l('Dienste durchsuchen …', 'Search services…')}
+        bind:value={query}
+      />
+    </label>
+    <span class="text-[9px] tabular-nums opacity-25"
+      >{visibleServices().length}/{services.length}</span
+    >
+  </div>
+
   <div class="space-y-1.5">
     {#if loading}
       <div
-        class="rounded-xl bg-black/[0.025] px-3 py-3 text-[11px] opacity-35 dark:bg-white/[0.035]"
+        class="rounded-xl border border-black/[0.05] px-4 py-8 text-center text-[11px] opacity-35 dark:border-white/[0.06]"
       >
         {l('Dienste werden geladen …', 'Loading services…')}
       </div>
     {:else if services.length === 0}
       <div
-        class="rounded-xl bg-black/[0.025] px-3 py-3 text-[11px] opacity-35 dark:bg-white/[0.035]"
+        class="rounded-xl border border-dashed border-black/10 px-5 py-10 text-center dark:border-white/10"
       >
-        {l('Noch keine Dienste angelegt.', 'No managed services yet.')}
+        <div class="text-[12px] font-medium opacity-55">
+          {l('Noch keine Dienste', 'No services yet')}
+        </div>
+        <div class="mx-auto mt-1 max-w-sm text-[10px] leading-4 opacity-30">
+          {l(
+            'Füge einen lokalen Prozess, MCP-Server oder vorhandenen Remote-Endpunkt hinzu. Persönliche Dienste werden nie vorinstalliert.',
+            'Add a local process, MCP server, or existing remote endpoint. Personal services are never preinstalled.'
+          )}
+        </div>
+        <button
+          class="mt-3 rounded-lg bg-black/[0.07] px-3 py-1.5 text-[10px] opacity-65 hover:opacity-90 dark:bg-white/10"
+          onclick={() => (addMenuOpen = true)}
+          >+ {l('Ersten Dienst hinzufügen', 'Add first service')}</button
+        >
+      </div>
+    {:else if visibleServices().length === 0}
+      <div
+        class="rounded-xl border border-black/[0.05] px-4 py-8 text-center text-[11px] opacity-35 dark:border-white/[0.06]"
+      >
+        {l('Keine passenden Dienste.', 'No matching services.')}
       </div>
     {/if}
 
-    {#each services as service (service.id)}
+    {#each visibleServices() as service (service.id)}
       <article
-        class="flex items-center gap-3 rounded-xl bg-black/[0.025] px-3 py-2.5 dark:bg-white/[0.035]"
+        class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-xl border border-transparent bg-black/[0.022] px-3 py-2.5 transition motion-reduce:transition-none hover:border-black/[0.06] hover:bg-black/[0.032] sm:grid-cols-[auto_minmax(150px,1fr)_auto] dark:bg-white/[0.028] dark:hover:border-white/[0.07] dark:hover:bg-white/[0.045]"
       >
         <span class={`h-2 w-2 shrink-0 rounded-full ${dotClass(service.status)}`}></span>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-1.5">
-            <span class="truncate text-[12px] opacity-75">{service.name}</span>
+        <div class="min-w-0">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <span class="truncate text-[12px] font-medium opacity-75">{service.name}</span>
             <span
-              class="rounded bg-black/5 px-1.5 py-0.5 text-[9px] uppercase opacity-35 dark:bg-white/10"
-              >{service.type}</span
+              class="rounded bg-black/5 px-1.5 py-0.5 text-[8px] uppercase tracking-wide opacity-35 dark:bg-white/10"
             >
+              {service.type === 'generic' ? 'local' : service.type}
+            </span>
           </div>
-          <div class="truncate text-[10px] opacity-30" title={service.lastError ?? service.command}>
-            {service.lastError ??
-              `${service.status}${service.externallyManaged ? ' · external process' : ''}`}
+          <div class="truncate font-mono text-[9px] opacity-30" title={serviceDetail(service)}>
+            {serviceDetail(service)}
           </div>
         </div>
-        <Switch
-          checked={service.enabled}
-          label={`${service.name} autostart`}
-          onchange={(value) => toggleEnabled(service, value)}
-        />
-        <button
-          class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 dark:hover:bg-white/10"
-          onclick={() => toggleRunning(service)}
-          >{service.status === 'running' || service.status === 'starting'
-            ? l('Stop', 'Stop')
-            : l('Start', 'Start')}</button
+        <div
+          class="col-span-2 ml-5 flex flex-wrap items-center justify-end gap-1 sm:col-span-1 sm:ml-0"
         >
-        <button
-          class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 dark:hover:bg-white/10"
-          onclick={() => (logService = service)}>{l('Logs', 'Logs')}</button
-        >
-        {#if service.type === 'mcpo'}
+          <span class="mr-1 text-[9px] capitalize opacity-30">{service.status}</span>
+          <Switch
+            checked={service.enabled}
+            label={`${service.name} autostart`}
+            onchange={(value) => toggleEnabled(service, value)}
+          />
           <button
-            class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 dark:hover:bg-white/10"
-            onclick={() => showIntegration(service)}>{l('Verbindung', 'Connection')}</button
+            class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
+            onclick={() => toggleRunning(service)}
+            >{service.status === 'running' || service.status === 'starting'
+              ? l('Stop', 'Stop')
+              : l('Start', 'Start')}</button
           >
-        {/if}
-        <button
-          class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 dark:hover:bg-white/10"
-          onclick={() => openEdit(service)}>{l('Bearbeiten', 'Edit')}</button
-        >
-        <button
-          class="rounded-lg px-2 py-1 text-[10px] text-red-500 opacity-35 hover:bg-red-500/10 hover:opacity-80"
-          onclick={() => remove(service)}>{l('Entfernen', 'Remove')}</button
-        >
+          <button
+            class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
+            onclick={() => (logService = service)}>{l('Logs', 'Logs')}</button
+          >
+          {#if service.type === 'mcpo' || service.type === 'remote'}
+            <button
+              class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
+              onclick={() => showIntegration(service)}>{l('Verbindung', 'Connection')}</button
+            >
+          {/if}
+          <button
+            class="rounded-lg px-2 py-1 text-[10px] opacity-45 hover:bg-black/5 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
+            onclick={() => openEdit(service)}>{l('Bearbeiten', 'Edit')}</button
+          >
+          <button
+            class="rounded-lg px-2 py-1 text-[10px] text-red-500 opacity-30 hover:bg-red-500/10 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+            onclick={() => remove(service)}>{l('Entfernen', 'Remove')}</button
+          >
+        </div>
       </article>
     {/each}
   </div>
@@ -436,7 +591,8 @@
               )}
           >
             <option value="mcpo">mcpo (MCP → OpenAPI)</option>
-            <option value="generic">Generic</option>
+            <option value="generic">{l('Lokaler Prozess', 'Local process')}</option>
+            <option value="remote">{l('Remote-Endpunkt', 'Remote endpoint')}</option>
           </select>
         </label>
         <label class="col-span-2 text-[11px] opacity-55"
@@ -478,6 +634,21 @@
             />
           </label>
         {:else if draft.mcpo}
+          <label class="col-span-2 text-[11px] opacity-55"
+            >{l('mcpo-Runner', 'mcpo runner')}
+            <input
+              class="mt-1 w-full rounded-lg border-none bg-black/5 px-3 py-2 font-mono outline-none dark:bg-white/10"
+              placeholder="uvx"
+              bind:value={draft.mcpo.runnerCommand}
+              onchange={refreshMcpoPreview}
+            />
+            <span class="mt-1 block text-[9px] leading-4 opacity-45">
+              {l(
+                '„uvx“ wird automatisch über PATH und übliche Python-Installationsordner gefunden. Alternativ einen absoluten Pfad eintragen.',
+                '“uvx” is resolved through PATH and common Python install folders. You can also enter an absolute path.'
+              )}
+            </span>
+          </label>
           <label class="col-span-2 text-[11px] opacity-55"
             >{l('MCP-Server-Executable', 'MCP server executable')}
             <input
@@ -521,6 +692,30 @@
               {assignedPortWarning()}
             </div>
           {/if}
+        {:else if draft.type === 'remote' && draft.remote}
+          <label class="col-span-2 text-[11px] opacity-55"
+            >{l('HTTP(S)-Endpunkt', 'HTTP(S) endpoint')}
+            <input
+              class="mt-1 w-full rounded-lg border-none bg-black/5 px-3 py-2 font-mono outline-none dark:bg-white/10"
+              placeholder="https://tools.example.com"
+              bind:value={draft.remote.url}
+            />
+            <span class="mt-1 block text-[9px] leading-4 opacity-45">
+              {l(
+                'Für GitHub, Gmail oder Kalender wird ein kompatibler Anbieter-Adapter bzw. Werkzeugserver benötigt; OAuth-Zugänge werden nicht vorgetäuscht oder mitgeliefert.',
+                'GitHub, Gmail, and calendar providers need a compatible adapter or tool server; provider OAuth is not bundled or simulated.'
+              )}
+            </span>
+          </label>
+          <label class="col-span-2 text-[11px] opacity-55"
+            >{l('Bearer-Token (optional, verschlüsselt)', 'Bearer token (optional, encrypted)')}
+            <input
+              type="password"
+              autocomplete="off"
+              class="mt-1 w-full rounded-lg border-none bg-black/5 px-3 py-2 font-mono outline-none dark:bg-white/10"
+              bind:value={draft.accessToken}
+            />
+          </label>
         {/if}
 
         <div class="col-span-2 mt-1 text-[11px] font-medium opacity-55">

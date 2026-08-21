@@ -15,14 +15,17 @@ import {
   materializeMcpoService,
   readLegacyAutostartEnabled
 } from './defaults'
-import { assertLocalHealthCheckUrl, getPortFromService } from './network'
+import { assertLocalHealthCheckUrl, assertRemoteEndpointUrl, getPortFromService } from './network'
 
 interface SecretPayload {
   apiKey?: string
+  accessToken?: string
   env: Record<string, string>
 }
 
-type PersistedService = Omit<ManagedServiceDefinition, 'env'> & { envKeys?: string[] }
+type PersistedService = Omit<ManagedServiceDefinition, 'env' | 'accessToken'> & {
+  envKeys?: string[]
+}
 
 interface PersistedRegistry {
   schemaVersion: number
@@ -112,8 +115,15 @@ export const normalizeServiceDefinition = (
     throw new Error('id may only contain letters, numbers, dots, underscores, and hyphens')
   }
 
-  const type = value.type === 'mcpo' ? 'mcpo' : value.type === 'generic' ? 'generic' : null
-  if (!type) throw new Error('type must be generic or mcpo')
+  const type =
+    value.type === 'mcpo'
+      ? 'mcpo'
+      : value.type === 'generic'
+        ? 'generic'
+        : value.type === 'remote'
+          ? 'remote'
+          : null
+  if (!type) throw new Error('type must be generic, mcpo, or remote')
 
   const base: ManagedServiceDefinition = {
     id,
@@ -141,9 +151,23 @@ export const normalizeServiceDefinition = (
     base.mcpo = {
       serverCommand: asString(value.mcpo.serverCommand, 'mcpo.serverCommand'),
       serverArgs: asStringArray(value.mcpo.serverArgs ?? [], 'mcpo.serverArgs'),
-      port: asInteger(value.mcpo.port, 8000, 1, 65_535, 'mcpo.port')
+      port: asInteger(value.mcpo.port, 8000, 1, 65_535, 'mcpo.port'),
+      ...(value.mcpo.runnerCommand
+        ? { runnerCommand: asString(value.mcpo.runnerCommand, 'mcpo.runnerCommand') }
+        : {})
     }
     return materializeMcpoService(base)
+  }
+
+  if (type === 'remote') {
+    if (!isRecord(value.remote)) throw new Error('remote settings are required')
+    base.remote = {
+      url: assertRemoteEndpointUrl(asString(value.remote.url, 'remote.url'))
+    }
+    if (value.accessToken !== undefined && value.accessToken !== '') {
+      base.accessToken = asString(value.accessToken, 'accessToken')
+    }
+    return base
   }
 
   if (value.healthCheckUrl !== undefined && value.healthCheckUrl !== '') {
@@ -154,10 +178,12 @@ export const normalizeServiceDefinition = (
   return base
 }
 
-const commandForDisplay = (service: ManagedServiceDefinition): string =>
-  [service.command, ...service.args]
+const commandForDisplay = (service: ManagedServiceDefinition): string => {
+  if (service.type === 'remote') return `Remote endpoint: ${service.remote?.url ?? ''}`
+  return [service.command, ...service.args]
     .map((part) => (/\s|"/.test(part) ? JSON.stringify(part) : part))
     .join(' ')
+}
 
 export class ManagedServicesRegistry {
   private services = new Map<string, ManagedServiceDefinition>()
@@ -175,10 +201,14 @@ export class ManagedServicesRegistry {
     for (const stored of persisted.services) {
       try {
         const secret = this.decryptSecret(stored.id, persisted)
-        const service = normalizeServiceDefinition({ ...stored, env: secret.env }, stored.id)
+        const service = normalizeServiceDefinition(
+          { ...stored, env: secret.env, accessToken: secret.accessToken },
+          stored.id
+        )
         this.services.set(service.id, service)
         this.secrets.set(service.id, {
           apiKey: service.type === 'mcpo' ? secret.apiKey || this.generateApiKey() : undefined,
+          accessToken: service.type === 'remote' ? secret.accessToken : undefined,
           env: secret.env
         })
       } catch (error) {
@@ -200,7 +230,11 @@ export class ManagedServicesRegistry {
           redactEnvironment ? '' : (service.env?.[key] ?? '')
         ])
       ),
-      mcpo: service.mcpo ? { ...service.mcpo, serverArgs: [...service.mcpo.serverArgs] } : undefined
+      accessToken: service.accessToken === undefined ? undefined : '',
+      mcpo: service.mcpo
+        ? { ...service.mcpo, serverArgs: [...service.mcpo.serverArgs] }
+        : undefined,
+      remote: service.remote ? { ...service.remote } : undefined
     }))
   }
 
@@ -213,12 +247,24 @@ export class ManagedServicesRegistry {
       env: includeEnvironment
         ? { ...(this.secrets.get(id)?.env ?? {}) }
         : Object.fromEntries(Object.keys(service.env ?? {}).map((key) => [key, ''])),
-      mcpo: service.mcpo ? { ...service.mcpo, serverArgs: [...service.mcpo.serverArgs] } : undefined
+      accessToken: includeEnvironment
+        ? this.secrets.get(id)?.accessToken
+        : service.accessToken === undefined
+          ? undefined
+          : '',
+      mcpo: service.mcpo
+        ? { ...service.mcpo, serverArgs: [...service.mcpo.serverArgs] }
+        : undefined,
+      remote: service.remote ? { ...service.remote } : undefined
     }
   }
 
   getApiKey(id: string): string | undefined {
     return this.secrets.get(id)?.apiKey
+  }
+
+  getAccessToken(id: string): string | undefined {
+    return this.secrets.get(id)?.accessToken
   }
 
   preview(value: unknown): ManagedServiceDefinition {
@@ -236,6 +282,7 @@ export class ManagedServicesRegistry {
         service.type === 'mcpo'
           ? (this.secrets.get(service.id)?.apiKey ?? this.generateApiKey())
           : undefined,
+      accessToken: service.type === 'remote' ? service.accessToken : undefined,
       env: { ...(service.env ?? {}) }
     }
     this.services.set(service.id, service)
@@ -260,6 +307,7 @@ export class ManagedServicesRegistry {
       nextServices.set(service.id, service)
       nextSecrets.set(service.id, {
         apiKey: service.type === 'mcpo' ? this.generateApiKey() : undefined,
+        accessToken: undefined,
         env: {}
       })
     }
@@ -274,6 +322,7 @@ export class ManagedServicesRegistry {
       schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
       services: this.list().map((service) => ({
         ...service,
+        accessToken: '',
         env: Object.fromEntries(Object.keys(service.env ?? {}).map((key) => [key, '']))
       }))
     }
@@ -341,6 +390,7 @@ export class ManagedServicesRegistry {
         const parsed = JSON.parse(safeStorage.decryptString(Buffer.from(encrypted, 'base64')))
         return {
           apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : undefined,
+          accessToken: typeof parsed.accessToken === 'string' ? parsed.accessToken : undefined,
           env: normalizeEnv(parsed.env)
         }
       } catch (error) {
@@ -356,6 +406,7 @@ export class ManagedServicesRegistry {
       )
       return {
         apiKey: typeof plaintext.apiKey === 'string' ? plaintext.apiKey : undefined,
+        accessToken: typeof plaintext.accessToken === 'string' ? plaintext.accessToken : undefined,
         env: normalizeEnv(plaintext.env)
       }
     }
@@ -386,10 +437,12 @@ export class ManagedServicesRegistry {
 
     const persisted: PersistedRegistry = {
       schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
-      services: [...this.services.values()].map(({ env, ...service }) => ({
-        ...service,
-        envKeys: Object.keys(env ?? {})
-      })),
+      services: [...this.services.values()].map(
+        ({ env, accessToken: _accessToken, ...service }) => ({
+          ...service,
+          envKeys: Object.keys(env ?? {})
+        })
+      ),
       ...(encryptionAvailable ? { encryptedSecrets } : {})
     }
 
@@ -413,6 +466,7 @@ export class ManagedServicesRegistry {
             id,
             {
               apiKey: typeof value.apiKey === 'string' ? value.apiKey : undefined,
+              accessToken: typeof value.accessToken === 'string' ? value.accessToken : undefined,
               env: normalizeEnv(value.env)
             }
           ]

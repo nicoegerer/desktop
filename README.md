@@ -1,7 +1,7 @@
-# Open WebUI Desktop
+# Open WebUI Desktop — Services Edition
 
-[![Version](https://img.shields.io/github/v/release/open-webui/desktop?label=version&color=%2331c48d)](https://github.com/open-webui/desktop/releases)
-[![Downloads](https://img.shields.io/github/downloads/open-webui/desktop/total?color=%23764abc)](https://github.com/open-webui/desktop/releases)
+[![Fork release](https://img.shields.io/github/v/release/nicoegerer/desktop?include_prereleases&label=services%20edition&color=%2331c48d)](https://github.com/nicoegerer/desktop/releases)
+[![Upstream](https://img.shields.io/badge/upstream-open--webui%2Fdesktop-6b7280)](https://github.com/open-webui/desktop)
 [![Discord](https://img.shields.io/discord/1170866489302188073?label=discord&color=%235865F2)](https://discord.gg/open-webui)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
@@ -9,23 +9,34 @@
 
 Your AI, right on your desktop. [Open WebUI](https://github.com/open-webui/open-webui) as a native app. Run models locally or connect to any server. No Docker, no terminal, no setup. Download, launch, chat.
 
+This public fork adds a provider-neutral **Services & Connectors** registry for local processes, MCP
+servers through mcpo, and remote HTTP(S) tool endpoints. It ships with no personal connectors or
+credentials. See [Services and connectors](docs/services-and-connectors.md) and
+[the fork architecture](FORK_NOTES.md).
+
+> [!IMPORTANT]
+> Installers with the services feature are published on the
+> [fork releases page](https://github.com/nicoegerer/desktop/releases). The scheduled upstream sync
+> merges official Open WebUI Desktop changes and republishes them through the fork update feed, so
+> installed Services Edition builds keep the feature while receiving upstream improvements.
+
 > [!WARNING]
 > **Early Alpha.** Things move fast and stuff might break. [Report bugs](https://github.com/open-webui/desktop/issues) or [come hang out on Discord](https://discord.gg/open-webui).
 
 ## Download
 
-| Platform | Installer |
-|----------|-----------|
-| macOS (Apple Silicon) | [**Download .dmg**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-arm64.dmg) |
-| macOS (Intel) | [**Download .dmg**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-x64.dmg) |
-| Windows x64 | [**Download .exe**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-x64-setup.exe) |
-| Windows ARM64 | [**Download .exe**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-arm64-setup.exe) |
-| Linux x64 (AppImage) | [**Download .AppImage**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_x64.AppImage) |
-| Linux x64 (Debian/Ubuntu) | [**Download .deb**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_amd64.deb) |
-| Linux x64 (Snap) | [**Download .snap**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_amd64.snap) |
-| Linux x64 (Flatpak) | [**Download .flatpak**](https://github.com/open-webui/desktop/releases/latest/download/open-webui.flatpak) |
-| Linux ARM64 (AppImage) | [**Download .AppImage**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_arm64.AppImage) |
-| Linux ARM64 (Debian/Ubuntu) | [**Download .deb**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_arm64.deb) |
+| Platform                    | Installer                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| macOS (Apple Silicon)       | [**Download .dmg**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-arm64.dmg)           |
+| macOS (Intel)               | [**Download .dmg**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-x64.dmg)             |
+| Windows x64                 | [**Download .exe**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-x64-setup.exe)       |
+| Windows ARM64               | [**Download .exe**](https://github.com/open-webui/desktop/releases/latest/download/open-webui-arm64-setup.exe)     |
+| Linux x64 (AppImage)        | [**Download .AppImage**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_x64.AppImage)   |
+| Linux x64 (Debian/Ubuntu)   | [**Download .deb**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_amd64.deb)           |
+| Linux x64 (Snap)            | [**Download .snap**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_amd64.snap)         |
+| Linux x64 (Flatpak)         | [**Download .flatpak**](https://github.com/open-webui/desktop/releases/latest/download/open-webui.flatpak)         |
+| Linux ARM64 (AppImage)      | [**Download .AppImage**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_arm64.AppImage) |
+| Linux ARM64 (Debian/Ubuntu) | [**Download .deb**](https://github.com/open-webui/desktop/releases/latest/download/open-webui_arm64.deb)           |
 
 Internet required on first launch. After that, everything works offline. [All releases →](https://github.com/open-webui/desktop/releases)
 
@@ -39,6 +50,7 @@ Use both at the same time.
 
 ## Highlights
 
+- 🔗 **Services & Connectors.** Add arbitrary local commands, MCP servers, or remote tool endpoints without hardcoded provider accounts.
 - ⚡ **Spotlight.** Hit `Shift+Cmd+I` (macOS) or `Shift+Ctrl+I` (Windows/Linux) to summon a floating chat bar over whatever you're doing. Drag to screenshot anything on screen.
 - 🎙️ **Voice input.** System-wide push-to-talk. Press the shortcut from any app to record, and your speech is transcribed and sent to your chat automatically.
 - 🧠 **Local inference.** Optionally run models entirely on your hardware via the built-in llama.cpp engine. Your data never leaves your machine.
@@ -50,11 +62,11 @@ Use both at the same time.
 
 ## System Requirements
 
-|  | Local Models | Remote Only |
-|--|-------------|-------------|
-| **Disk** | 5 GB+ | ~500 MB |
-| **RAM** | 16 GB+ | 4 GB |
-| **OS** | macOS 12+, Windows 10+, modern Linux (glibc 2.28+) | Same |
+|          | Local Models                                       | Remote Only |
+| -------- | -------------------------------------------------- | ----------- |
+| **Disk** | 5 GB+                                              | ~500 MB     |
+| **RAM**  | 16 GB+                                             | 4 GB        |
+| **OS**   | macOS 12+, Windows 10+, modern Linux (glibc 2.28+) | Same        |
 
 > [!NOTE]
 > Local models need serious RAM (7B ≈ 8 GB, 13B ≈ 16 GB). Lighter machine? Connect to a remote server instead.

@@ -47,7 +47,6 @@
   "common.experimental": "Experimental",
   "common.copied": "✓",
 
-
   "setup.newConnection": "New Connection",
   "setup.newConnectionDesc": "Connect to a remote Open WebUI server.",
   "setup.orInstallLocally": "Or install locally →",
@@ -146,6 +145,7 @@
   "settings.tabs.inference": "Inference Runtime",
   "settings.tabs.models": "Models",
   "settings.tabs.connections": "Connections",
+  "settings.tabs.services": "Services & Connectors",
   "settings.tabs.about": "About",
 
   "settings.general.defaultConnection": "Default connection",

@@ -17,6 +17,7 @@ import {
   isPortInUse,
   waitForPortToClose
 } from './network'
+import { resolveExecutable } from './executables'
 import { ManagedServicesRegistry } from './registry'
 import { LineRingBuffer } from './ring-buffer'
 
@@ -76,8 +77,15 @@ export class ManagedServicesManager {
 
   getIntegration(id: string): ManagedServiceIntegration {
     const runtime = this.getRuntime(id)
+    if (runtime.definition.type === 'remote' && runtime.definition.remote) {
+      return {
+        url: runtime.definition.remote.url,
+        bearerKey: this.registry.getAccessToken(runtime.definition.id) ?? '',
+        commandPreview: `Remote endpoint: ${runtime.definition.remote.url}`
+      }
+    }
     if (runtime.definition.type !== 'mcpo' || !runtime.definition.mcpo) {
-      throw new Error('Integration details are only available for mcpo services')
+      throw new Error('Integration details are only available for connector services')
     }
     const bearerKey = this.registry.getApiKey(runtime.definition.id)
     if (!bearerKey) throw new Error('The mcpo API key is unavailable')
@@ -139,6 +147,17 @@ export class ManagedServicesManager {
     const generation = runtime.generation
     this.setStatus(runtime, 'starting')
 
+    if (runtime.definition.type === 'remote' && runtime.definition.remote) {
+      runtime.logs.add(`Checking remote endpoint ${runtime.definition.remote.url}`)
+      if (await isHealthCheckReady(runtime.definition.remote.url)) {
+        runtime.ownsProcess = false
+        runtime.logs.add('Remote endpoint is reachable')
+        this.setStatus(runtime, 'running')
+        return this.snapshot(runtime)
+      }
+      return this.fail(runtime, 'Remote endpoint did not respond successfully', false)
+    }
+
     const port = getPortFromService(
       runtime.definition.healthCheckUrl,
       runtime.definition.mcpo?.port
@@ -163,13 +182,14 @@ export class ManagedServicesManager {
       const args = runtime.definition.args.map((argument) =>
         argument === MCPO_API_KEY_PLACEHOLDER ? (secretKey ?? '') : argument
       )
+      const launchCommand = await resolveExecutable(runtime.definition.command)
       runtime.logs.add(
-        `Starting ${runtime.definition.command} ${runtime.definition.args
+        `Starting ${launchCommand} ${runtime.definition.args
           .map((argument) => (argument === MCPO_API_KEY_PLACEHOLDER ? '<redacted>' : argument))
           .join(' ')}`
       )
 
-      const child = spawn(runtime.definition.command, args, {
+      const child = spawn(launchCommand, args, {
         cwd: runtime.definition.cwd || undefined,
         env: { ...process.env, ...(runtime.definition.env ?? {}) },
         detached: process.platform !== 'win32',
@@ -243,6 +263,15 @@ export class ManagedServicesManager {
 
   async stop(id: string, allowExternal = false): Promise<ManagedServiceSnapshot> {
     const runtime = this.getRuntime(id)
+    if (runtime.definition.type === 'remote') {
+      runtime.stopRequested = true
+      runtime.generation += 1
+      runtime.lastError = undefined
+      runtime.logs.add('Remote endpoint monitoring stopped')
+      this.setStatus(runtime, 'stopped')
+      runtime.stopRequested = false
+      return this.snapshot(runtime)
+    }
     const ownedProcess = !!runtime.process && runtime.ownsProcess
     runtime.stopRequested = true
     runtime.generation += 1

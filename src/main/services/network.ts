@@ -27,6 +27,17 @@ export const assertLocalHealthCheckUrl = (value: string): string => {
   return url.toString()
 }
 
+export const assertRemoteEndpointUrl = (value: string): string => {
+  const url = new URL(value)
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('Remote endpoints must use HTTP(S)')
+  }
+  if (url.username || url.password) {
+    throw new Error('Store access tokens separately instead of embedding credentials in the URL')
+  }
+  return url.toString()
+}
+
 export const isPortInUse = (port: number, timeoutMs = 500): Promise<boolean> =>
   new Promise((resolve) => {
     const socket = net.createConnection({ host: '127.0.0.1', port })

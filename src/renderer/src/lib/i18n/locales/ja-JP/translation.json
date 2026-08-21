@@ -126,6 +126,7 @@
   "settings.tabs.inference": "推論ランタイム",
   "settings.tabs.models": "モデル",
   "settings.tabs.connections": "接続",
+  "settings.tabs.services": "サービスとコネクター",
   "settings.tabs.about": "バージョン情報",
   "settings.general.defaultConnection": "デフォルト接続",
   "settings.general.defaultConnectionDesc": "起動時に使用する接続",

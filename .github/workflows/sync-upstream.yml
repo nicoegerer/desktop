@@ -1,0 +1,76 @@
+name: Sync Official Upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+
+jobs:
+  sync:
+    name: Mirror upstream and publish Services Edition update
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release history
+        uses: actions/checkout@v4
+        with:
+          ref: release
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch official upstream and fork branches
+        run: |
+          git remote add upstream https://github.com/open-webui/desktop.git
+          git fetch upstream main
+          git fetch origin main managed-services release
+
+      - name: Keep main as an exact upstream mirror
+        run: |
+          git checkout -B main origin/main
+          if ! git merge --ff-only upstream/main; then
+            echo "::error::main diverged from upstream. Keep fork changes on managed-services; main was not overwritten."
+            exit 1
+          fi
+          git push origin main
+
+      - name: Merge upstream into managed-services
+        id: feature
+        run: |
+          git checkout -B managed-services origin/managed-services
+          BEFORE=$(git rev-parse HEAD)
+          if ! git merge --no-edit upstream/main; then
+            git merge --abort
+            echo "::error::Upstream conflicts with managed-services. Resolve the conflict on the feature branch; no release was changed."
+            exit 1
+          fi
+          AFTER=$(git rev-parse HEAD)
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already current with official upstream."
+          else
+            git push origin managed-services
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge feature and prepare one release commit
+        if: steps.feature.outputs.changed == 'true'
+        run: |
+          git checkout -B release origin/release
+          if ! git merge --no-edit managed-services; then
+            git merge --abort
+            echo "::error::The release branch conflicts with managed-services. No partial release was pushed."
+            exit 1
+          fi
+          VERSION=$(node .github/scripts/bump-services-version.mjs)
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore: release v$VERSION"
+          git push origin release

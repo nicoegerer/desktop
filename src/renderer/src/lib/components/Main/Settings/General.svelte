@@ -3,7 +3,6 @@
   import { connections, config } from '../../../stores'
   import i18n, { getLanguages, changeLanguage } from '../../../i18n'
   import Switch from '../../common/Switch.svelte'
-  import Services from './Services.svelte'
 
   let launchAtLogin = $state(false)
   let runInBackground = $state(true)
@@ -417,7 +416,6 @@
     />
   </div>
 
-  <Services />
 
   <div class="py-4 flex items-center justify-between">
     <div>

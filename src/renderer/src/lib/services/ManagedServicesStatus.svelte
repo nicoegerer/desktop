@@ -2,13 +2,18 @@
   import { onDestroy, onMount } from 'svelte'
 
   import type { ManagedServiceSnapshot } from '../../../../shared/services/types'
-  import ManagedServiceLogs from './ManagedServiceLogs.svelte'
+
+  interface Props {
+    activeServiceId?: string | null
+    onSelectService: (service: ManagedServiceSnapshot) => void
+  }
+
+  let { activeServiceId = null, onSelectService }: Props = $props()
 
   type MainDataMessage = { type: string; data?: unknown }
 
   let services = $state<ManagedServiceSnapshot[]>([])
   let expanded = $state(false)
-  let logService = $state<ManagedServiceSnapshot | null>(null)
   let unsubscribe: (() => void) | null = null
 
   const visible = $derived(services.slice(0, 3))
@@ -28,15 +33,16 @@
       index === -1
         ? [...services, service]
         : services.map((entry, itemIndex) => (itemIndex === index ? service : entry))
-    if (logService?.id === service.id) logService = service
   }
 
   const activate = async (service: ManagedServiceSnapshot): Promise<void> => {
     if (service.status === 'stopped' || service.status === 'failed') {
-      updateStatus(await window.electronAPI.startManagedService(service.id))
-    } else {
-      logService = service
+      const started = await window.electronAPI.startManagedService(service.id)
+      updateStatus(started)
+      onSelectService(started)
+      return
     }
+    onSelectService(service)
   }
 
   const stop = async (event: MouseEvent, service: ManagedServiceSnapshot): Promise<void> => {
@@ -73,7 +79,10 @@
   <div class="relative flex min-w-0 items-center gap-0.5">
     {#each visible as service (service.id)}
       <button
-        class="flex max-w-28 items-center gap-1.5 truncate rounded-md border-none bg-transparent px-2 py-0.5 text-[11px] text-[#1d1d1f] opacity-50 transition-all hover:bg-black/[0.04] hover:opacity-80 dark:text-[#fafafa] dark:hover:bg-white/[0.06]"
+        class="flex max-w-28 items-center gap-1.5 truncate rounded-md border-none bg-transparent px-2 py-0.5 text-[11px] text-[#1d1d1f] transition-all hover:bg-black/[0.04] hover:opacity-80 dark:text-[#fafafa] dark:hover:bg-white/[0.06] {activeServiceId ===
+        service.id
+          ? 'bg-black/[0.08] opacity-90 dark:bg-white/[0.1]'
+          : 'opacity-50'}"
         title={`${service.name}: ${service.status}${service.lastError ? ` — ${service.lastError}` : ''}`}
         onclick={() => activate(service)}
         oncontextmenu={(event) => stop(event, service)}
@@ -113,12 +122,4 @@
       </div>
     {/if}
   </div>
-{/if}
-
-{#if logService}
-  <ManagedServiceLogs
-    id={logService.id}
-    name={logService.name}
-    onClose={() => (logService = null)}
-  />
 {/if}

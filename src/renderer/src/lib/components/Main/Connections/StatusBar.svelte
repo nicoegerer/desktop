@@ -3,6 +3,7 @@
   import i18n from '../../../i18n'
   import { tooltip } from '../../../actions/tooltip'
   import { appInfo } from '../../../stores'
+  import type { ManagedServiceSnapshot } from '../../../../../../shared/services/types'
   import ManagedServicesStatus from '../../../services/ManagedServicesStatus.svelte'
   import trayIcon from '../../../../../../../resources/tray.png'
 
@@ -15,7 +16,9 @@
     openTerminalInstalled: boolean
     llamaCppInstalled: boolean
     activeLog: string | null
+    activeManagedServiceId: string | null
     onSelectLog: (log: string) => void
+    onSelectManagedService: (service: ManagedServiceSnapshot) => void
     onStartServer: () => void
     onToggleOpenTerminal: () => void
     onToggleLlamaCpp: () => void
@@ -30,7 +33,9 @@
     openTerminalInstalled,
     llamaCppInstalled,
     activeLog,
+    activeManagedServiceId,
     onSelectLog,
+    onSelectManagedService,
     onStartServer,
     onToggleOpenTerminal,
     onToggleLlamaCpp
@@ -177,7 +182,10 @@
   </button>
   {/if}
 
-  <ManagedServicesStatus />
+  <ManagedServicesStatus
+    {activeManagedServiceId}
+    onSelectService={onSelectManagedService}
+  />
 
   <!-- Version (right-aligned) -->
   <span class="ml-auto text-[10px] opacity-25 select-none">v{$appInfo?.version ?? ''}</span>
