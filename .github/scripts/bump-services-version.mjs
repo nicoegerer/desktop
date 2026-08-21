@@ -21,8 +21,8 @@ const upstreamPackage = JSON.parse(
   execFileSync('git', ['show', 'upstream/main:package.json'], { encoding: 'utf8' })
 )
 const upstream = parse(upstreamPackage.version)
-const upstreamFloor = { ...upstream, patch: upstream.patch + 1, iteration: 0 }
-const base = compare(current, upstreamFloor) >= 0 ? current : upstreamFloor
+const upstreamBase = { ...upstream, iteration: 0 }
+const base = compare(current, upstreamBase) >= 0 ? current : upstreamBase
 const sameServicesBase =
   current.major === base.major &&
   current.minor === base.minor &&
