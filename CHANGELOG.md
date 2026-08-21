@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.22-services.1] - 2026-08-21
+## [0.0.20-services.1] - 2026-08-21
 
 This release turns the earlier OmniRoute-specific fork into a public, provider-neutral Services
 Edition while preserving the existing in-app update feed.
