@@ -167,6 +167,13 @@ export class ManagedServicesManager {
         ? await isHealthCheckReady(runtime.definition.healthCheckUrl)
         : false
       if (ready) {
+        if (runtime.definition.type === 'mcpo') {
+          return this.fail(
+            runtime,
+            `Port ${port} already hosts another process. Managed MCP connectors are not adopted because the API key cannot be verified. Stop the existing process, choose another port, or add it as a remote endpoint with its current bearer token.`,
+            false
+          )
+        }
         runtime.ownsProcess = false
         runtime.logs.add(
           `Detected an already-running service on port ${port}; no duplicate was started`
