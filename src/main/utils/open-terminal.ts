@@ -2,6 +2,7 @@
 
 import crypto from 'crypto'
 import log from 'electron-log'
+import { safeStorage } from 'electron'
 import * as pty from 'node-pty'
 import {
   getPythonPath,
@@ -21,6 +22,7 @@ let ptyProcess: pty.IPty | null = null
 let pid: number | null = null
 let url: string | null = null
 let apiKey: string | null = null
+let workingDirectory: string | null = null
 let status: string | null = null // null | starting | started | stopped | failed
 let logBuffer: string[] = []
 
@@ -31,6 +33,7 @@ const lock = new ServiceLock('open-terminal')
 export const getOpenTerminalInfo = () => ({
   url,
   apiKey,
+  workingDirectory,
   status,
   pid
 })
@@ -41,9 +44,9 @@ export const getOpenTerminalLog = (): string[] => logBuffer
 export const startOpenTerminal = async (
   port: number | null = null,
   onStatus?: (status: string) => void
-): Promise<{ url: string; apiKey: string; pid: number }> => {
+): Promise<{ url: string; apiKey: string; pid: number; workingDirectory: string }> => {
   if (!lock.acquire()) {
-    return { url, apiKey, pid }
+    return { url, apiKey, pid, workingDirectory }
   }
 
   await stopOpenTerminal()
@@ -74,7 +77,7 @@ export const startOpenTerminal = async (
     } catch (err) {
       throw new Error(
         `Open Terminal is not installed and auto-install failed. ` +
-        `Please connect to the internet and try again. (${err?.message ?? err})`
+          `Please connect to the internet and try again. (${err?.message ?? err})`
       )
     }
   }
@@ -84,13 +87,34 @@ export const startOpenTerminal = async (
   const config = await getConfig()
   const configEnvVars = config.envVars ?? {}
 
-  // Use persisted API key or generate and save a new one
-  let generatedKey = config.openTerminal?.apiKey
-  if (!generatedKey) {
-    generatedKey = crypto.randomBytes(24).toString('base64url')
-    await setConfig({
-      openTerminal: { ...config.openTerminal, apiKey: generatedKey }
-    })
+  // Migrate legacy plaintext keys to Electron safeStorage whenever the OS supports it.
+  // The key is supplied through the environment so it never appears in logs or process arguments.
+  const encryptedKey = config.openTerminal?.apiKeyEncrypted
+  let generatedKey = config.openTerminal?.apiKey || ''
+  if (encryptedKey) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('The saved Open Terminal key cannot be decrypted on this system.')
+    }
+    try {
+      generatedKey = safeStorage.decryptString(Buffer.from(encryptedKey, 'base64'))
+    } catch (error) {
+      throw new Error(`The saved Open Terminal key is invalid: ${error?.message ?? error}`)
+    }
+  }
+  if (!generatedKey) generatedKey = crypto.randomBytes(24).toString('base64url')
+
+  if (safeStorage.isEncryptionAvailable()) {
+    const { apiKey: _legacyApiKey, ...openTerminalConfig } = config.openTerminal ?? {}
+    if (!encryptedKey || config.openTerminal?.apiKey) {
+      await setConfig({
+        openTerminal: {
+          ...openTerminalConfig,
+          apiKeyEncrypted: safeStorage.encryptString(generatedKey).toString('base64')
+        }
+      })
+    }
+  } else if (!config.openTerminal?.apiKey) {
+    await setConfig({ openTerminal: { ...config.openTerminal, apiKey: generatedKey } })
   }
 
   // Find available port
@@ -106,11 +130,17 @@ export const startOpenTerminal = async (
   const cwd = config.openTerminal?.cwd || require('os').homedir()
 
   const commandArgs = [
-    '-m', 'uv', 'run', 'open-terminal', 'run',
-    '--host', host,
-    '--port', availablePort.toString(),
-    '--api-key', generatedKey,
-    '--cwd', cwd
+    '-m',
+    'uv',
+    'run',
+    'open-terminal',
+    'run',
+    '--host',
+    host,
+    '--port',
+    availablePort.toString(),
+    '--cwd',
+    cwd
   ]
 
   log.info('Starting Open Terminal...', pythonPath, commandArgs.join(' '))
@@ -124,14 +154,14 @@ export const startOpenTerminal = async (
       env: {
         ...process.env,
         ...(configEnvVars ?? {}),
+        OPEN_TERMINAL_API_KEY: generatedKey,
+        OPEN_TERMINAL_FILE_BROWSER_ROOT: cwd,
         PYTHONUNBUFFERED: '1',
         ...(process.platform === 'win32' ? { PYTHONIOENCODING: 'utf-8' } : {})
       }
     })
   } catch (error) {
-    throw new Error(
-      `Failed to spawn Open Terminal: ${error?.message ?? error}`
-    )
+    throw new Error(`Failed to spawn Open Terminal: ${error?.message ?? error}`)
   }
 
   const spawnedPid = spawned.pid
@@ -139,6 +169,7 @@ export const startOpenTerminal = async (
   ptyProcess = spawned
   pid = spawnedPid
   apiKey = generatedKey
+  workingDirectory = cwd
   status = 'starting'
 
   spawned.onData((data: string) => {
@@ -152,6 +183,7 @@ export const startOpenTerminal = async (
     pid = null
     url = null
     apiKey = null
+    workingDirectory = null
     status = 'stopped'
   })
 
@@ -160,7 +192,7 @@ export const startOpenTerminal = async (
   status = 'started'
   log.info(`Open Terminal started — PID: ${spawnedPid}, URL: ${serverUrl}`)
 
-  return { url: serverUrl, apiKey: generatedKey, pid: spawnedPid }
+  return { url: serverUrl, apiKey: generatedKey, pid: spawnedPid, workingDirectory: cwd }
 }
 
 export const stopOpenTerminal = async (): Promise<void> => {
@@ -186,6 +218,7 @@ export const stopOpenTerminal = async (): Promise<void> => {
   pid = null
   url = null
   apiKey = null
+  workingDirectory = null
   status = null
   logBuffer = []
   lock.release()

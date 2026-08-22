@@ -9,9 +9,16 @@ import { ipcRenderer, contextBridge } from 'electron'
 
 type EventCallback = (data: any) => void
 const eventCallbacks: EventCallback[] = []
+const pendingEvents: any[] = []
+const MAX_PENDING_EVENTS = 50
 
 // Embedder → Guest (push events from desktop)
 ipcRenderer.on('desktop:event', (_event, data) => {
+  if (eventCallbacks.length === 0) {
+    pendingEvents.push(data)
+    if (pendingEvents.length > MAX_PENDING_EVENTS) pendingEvents.shift()
+    return
+  }
   eventCallbacks.forEach((cb) => cb(data))
 })
 
@@ -28,6 +35,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Push events: desktop → Open WebUI
   onEvent: (callback: EventCallback): void => {
     eventCallbacks.push(callback)
+    const queued = pendingEvents.splice(0)
+    queued.forEach((event) => callback(event))
   },
 
   // Request/Response: Open WebUI → desktop
