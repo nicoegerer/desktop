@@ -16,6 +16,7 @@
   let services = $state<ManagedServiceSnapshot[]>([])
   let loading = $state(true)
   let error = $state('')
+  let editorError = $state('')
   let editorOpen = $state(false)
   let addMenuOpen = $state(false)
   let saving = $state(false)
@@ -68,6 +69,7 @@
     restartLimit: 3,
     startupTimeoutMs: 120_000,
     env: {},
+    apiKey: type === 'mcpo' ? '' : undefined,
     mcpo:
       type === 'mcpo'
         ? { serverCommand: '', serverArgs: [], port, runnerCommand: 'uvx' }
@@ -77,6 +79,7 @@
 
   const openAdd = async (type: ManagedServiceDefinition['type']): Promise<void> => {
     error = ''
+    editorError = ''
     const port = await window.electronAPI.suggestManagedServicePort()
     draft = emptyService(port, type)
     argsText = ''
@@ -87,6 +90,7 @@
 
   const openEdit = async (service: ManagedServiceSnapshot): Promise<void> => {
     error = ''
+    editorError = ''
     const full = await window.electronAPI.getManagedService(service.id)
     draft = full
     argsText = (full.type === 'mcpo' ? full.mcpo?.serverArgs : full.args)?.join('\n') ?? ''
@@ -96,6 +100,7 @@
 
   const refreshMcpoPreview = async (): Promise<void> => {
     if (!draft || draft.type !== 'mcpo' || !draft.mcpo?.serverCommand.trim()) return
+    const apiKey = draft.apiKey
     try {
       const preview = await window.electronAPI.previewManagedService({
         ...draft,
@@ -105,9 +110,10 @@
           serverArgs: argsText.split(/\r?\n/).filter((entry) => entry.length > 0)
         }
       })
-      draft = { ...preview, id: draft.id }
+      draft = { ...preview, id: draft.id, apiKey }
+      editorError = ''
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause)
+      editorError = cause instanceof Error ? cause.message : String(cause)
     }
   }
 
@@ -123,6 +129,7 @@
         type: 'generic',
         mcpo: undefined,
         remote: undefined,
+        apiKey: undefined,
         accessToken: undefined
       }
       return
@@ -135,6 +142,7 @@
         command: '',
         args: [],
         mcpo: undefined,
+        apiKey: undefined,
         remote: { url: draft.remote?.url ?? '' },
         accessToken: draft.accessToken ?? ''
       }
@@ -148,6 +156,7 @@
       ...draft,
       type: 'mcpo',
       remote: undefined,
+      apiKey: draft.apiKey ?? '',
       accessToken: undefined,
       mcpo: { serverCommand: draft.command, serverArgs, port, runnerCommand: 'uvx' }
     }
@@ -170,28 +179,31 @@
 
   const save = async (): Promise<void> => {
     if (!draft) return
-    error = ''
+    editorError = ''
     if (!draft.name.trim()) {
-      error = l('Ein Anzeigename ist erforderlich.', 'A display name is required.')
+      editorError = l('Ein Anzeigename ist erforderlich.', 'A display name is required.')
       return
     }
     if (draft.type === 'generic' && !draft.command.trim()) {
-      error = l('Ein Kommando ist erforderlich.', 'A command is required.')
+      editorError = l('Ein Kommando ist erforderlich.', 'A command is required.')
       return
     }
     if (draft.type === 'mcpo' && !draft.mcpo?.serverCommand.trim()) {
-      error = l(
+      editorError = l(
         'Der Pfad zum MCP-Server ist erforderlich.',
         'The MCP server executable is required.'
       )
       return
     }
     if (draft.type === 'remote' && !draft.remote?.url.trim()) {
-      error = l('Eine Remote-Endpunkt-URL ist erforderlich.', 'A remote endpoint URL is required.')
+      editorError = l(
+        'Eine Remote-Endpunkt-URL ist erforderlich.',
+        'A remote endpoint URL is required.'
+      )
       return
     }
     if (assignedPortWarning()) {
-      error = assignedPortWarning()
+      editorError = assignedPortWarning()
       return
     }
 
@@ -224,7 +236,7 @@
       if (saved.type === 'mcpo' || saved.type === 'remote') await showIntegration(saved)
       await refresh()
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause)
+      editorError = cause instanceof Error ? cause.message : String(cause)
     } finally {
       saving = false
     }
@@ -579,6 +591,15 @@
         >
       </div>
 
+      {#if editorError}
+        <div
+          class="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-[11px] text-red-600 dark:text-red-300"
+          role="alert"
+        >
+          {editorError}
+        </div>
+      {/if}
+
       <div class="grid grid-cols-2 gap-3">
         <label class="col-span-2 text-[11px] opacity-55"
           >{l('Typ', 'Type')}
@@ -657,6 +678,25 @@
               bind:value={draft.mcpo.serverCommand}
               onchange={refreshMcpoPreview}
             />
+          </label>
+          <label class="col-span-2 text-[11px] opacity-55"
+            >{l('mcpo API-Key (optional, verschlüsselt)', 'mcpo API key (optional, encrypted)')}
+            <input
+              type="password"
+              autocomplete="new-password"
+              class="mt-1 w-full rounded-lg border-none bg-black/5 px-3 py-2 font-mono outline-none dark:bg-white/10"
+              placeholder={l(
+                'Leer lassen, um einen sicheren Schlüssel zu erzeugen',
+                'Leave empty to generate a secure key'
+              )}
+              bind:value={draft.apiKey}
+            />
+            <span class="mt-1 block text-[9px] leading-4 opacity-45">
+              {l(
+                'Bei einem bereits eingerichteten Open-WebUI-Eintrag denselben Schlüssel verwenden oder nach dem Speichern den neu erzeugten Bearer-Key übernehmen.',
+                'Reuse the key from an existing Open WebUI entry, or copy the newly generated bearer key after saving.'
+              )}
+            </span>
           </label>
           <label class="text-[11px] opacity-55"
             >{l('Port', 'Port')}
@@ -833,8 +873,8 @@
       <h3 class="m-0 text-[14px] font-medium">{integrationName}: Open WebUI</h3>
       <p class="text-[11px] opacity-45">
         {l(
-          'Unter Integrationen → Externe Werkzeug-Server eintragen:',
-          'Enter these values under Integrations → External Tool Servers:'
+          'Unter Integrationen → Externe Werkzeug-Server mit Auth-Typ „Bearer“ eintragen. Im Schlüssel-Feld nur den Wert ohne „Bearer “ verwenden und einen alten Schlüssel vollständig ersetzen:',
+          'Enter these values under Integrations → External Tool Servers using the “Bearer” auth type. Put only the value without “Bearer ” in the key field and fully replace any old key:'
         )}
       </p>
       {#each [[l('URL', 'URL'), integration.url], [l('Bearer-Key', 'Bearer key'), integration.bearerKey], [l('Kommando', 'Command'), integration.commandPreview]] as item (item[0])}

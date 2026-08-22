@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.2] - 2026-08-22
+
+### Fixed
+
+- **MCP Connector Form Errors Hidden Behind the Dialog.** Validation and save failures now appear
+  inside the service editor, so a rejected port or invalid field no longer looks like an inactive
+  Save button.
+- **mcpo `403 Invalid API key`.** MCP connectors accept an optional encrypted API key, show exact
+  Bearer setup guidance after saving, and no longer adopt an unrelated process on the same port
+  with an unverifiable key.
+
 ## [0.0.20-services.1] - 2026-08-21
 
 This release turns the earlier OmniRoute-specific fork into a public, provider-neutral Services

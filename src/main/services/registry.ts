@@ -23,7 +23,7 @@ interface SecretPayload {
   env: Record<string, string>
 }
 
-type PersistedService = Omit<ManagedServiceDefinition, 'env' | 'accessToken'> & {
+type PersistedService = Omit<ManagedServiceDefinition, 'env' | 'apiKey' | 'accessToken'> & {
   envKeys?: string[]
 }
 
@@ -230,6 +230,7 @@ export class ManagedServicesRegistry {
           redactEnvironment ? '' : (service.env?.[key] ?? '')
         ])
       ),
+      apiKey: service.type === 'mcpo' ? '' : undefined,
       accessToken: service.accessToken === undefined ? undefined : '',
       mcpo: service.mcpo
         ? { ...service.mcpo, serverArgs: [...service.mcpo.serverArgs] }
@@ -247,6 +248,12 @@ export class ManagedServicesRegistry {
       env: includeEnvironment
         ? { ...(this.secrets.get(id)?.env ?? {}) }
         : Object.fromEntries(Object.keys(service.env ?? {}).map((key) => [key, ''])),
+      apiKey:
+        service.type === 'mcpo'
+          ? includeEnvironment
+            ? this.secrets.get(id)?.apiKey
+            : ''
+          : undefined,
       accessToken: includeEnvironment
         ? this.secrets.get(id)?.accessToken
         : service.accessToken === undefined
@@ -276,11 +283,18 @@ export class ManagedServicesRegistry {
     const current = incomingId ? this.services.get(incomingId) : undefined
     const service = normalizeServiceDefinition(value, current?.id)
     this.assertUniquePort(service)
+    const requestedApiKey =
+      service.type === 'mcpo' &&
+      isRecord(value) &&
+      typeof value.apiKey === 'string' &&
+      value.apiKey.trim()
+        ? asString(value.apiKey, 'apiKey')
+        : undefined
 
     const secret: SecretPayload = {
       apiKey:
         service.type === 'mcpo'
-          ? (this.secrets.get(service.id)?.apiKey ?? this.generateApiKey())
+          ? (requestedApiKey ?? this.secrets.get(service.id)?.apiKey ?? this.generateApiKey())
           : undefined,
       accessToken: service.type === 'remote' ? service.accessToken : undefined,
       env: { ...(service.env ?? {}) }
@@ -322,6 +336,7 @@ export class ManagedServicesRegistry {
       schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
       services: this.list().map((service) => ({
         ...service,
+        apiKey: '',
         accessToken: '',
         env: Object.fromEntries(Object.keys(service.env ?? {}).map((key) => [key, '']))
       }))
@@ -438,7 +453,7 @@ export class ManagedServicesRegistry {
     const persisted: PersistedRegistry = {
       schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
       services: [...this.services.values()].map(
-        ({ env, accessToken: _accessToken, ...service }) => ({
+        ({ env, apiKey: _apiKey, accessToken: _accessToken, ...service }) => ({
           ...service,
           envKeys: Object.keys(env ?? {})
         })

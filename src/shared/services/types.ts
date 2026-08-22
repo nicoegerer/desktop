@@ -30,6 +30,7 @@ export interface ManagedServiceDefinition {
   startupTimeoutMs: number
   mcpo?: McpoServiceOptions
   remote?: RemoteServiceOptions
+  apiKey?: string
   accessToken?: string
 }
 
