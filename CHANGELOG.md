@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.3] - 2026-08-23
+
+### Added
+
+- **Agentic Local Workspaces.** A guided Services card lets users choose a project folder, start Open
+  Terminal there, and synchronize it with the bundled local Open WebUI so tool-capable models can
+  edit files, use Git, and run builds and tests.
+- **GitHub MCP Preset.** The Add menu now includes an optional template for GitHub's official Docker
+  MCP server. It requires the user to supply a fine-grained token and never installs an account,
+  credential, or enabled service by default.
+
+### Fixed
+
+- **Open Terminal Registration Race.** Autostart now registers Open Terminal in the local Open WebUI,
+  and desktop events wait until the embedded client installs its authenticated event handler.
+- **Stale Open Terminal API Keys.** Running instances can explicitly refresh their Open WebUI entry.
+  Keys no longer appear in command-line arguments or logs and migrate to OS-backed encryption when
+  available.
+
 ## [0.0.20-services.2] - 2026-08-22
 
 ### Fixed

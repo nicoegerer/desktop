@@ -51,6 +51,8 @@ Use both at the same time.
 ## Highlights
 
 - 🔗 **Services & Connectors.** Add arbitrary local commands, MCP servers, or remote tool endpoints without hardcoded provider accounts.
+- 💻 **Agentic workspaces.** Choose a local project folder, connect it through Open Terminal, and let tool-capable models edit files, use Git, and run builds or tests.
+- 🐙 **GitHub MCP preset.** Optionally configure GitHub's official MCP server with your own least-privilege token; nothing is connected by default.
 - ⚡ **Spotlight.** Hit `Shift+Cmd+I` (macOS) or `Shift+Ctrl+I` (Windows/Linux) to summon a floating chat bar over whatever you're doing. Drag to screenshot anything on screen.
 - 🎙️ **Voice input.** System-wide push-to-talk. Press the shortcut from any app to record, and your speech is transcribed and sent to your chat automatically.
 - 🧠 **Local inference.** Optionally run models entirely on your hardware via the built-in llama.cpp engine. Your data never leaves your machine.

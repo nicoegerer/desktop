@@ -115,6 +115,7 @@ const api = {
   // Open Terminal
   startOpenTerminal: () => ipcRenderer.invoke('open-terminal:start'),
   stopOpenTerminal: () => ipcRenderer.invoke('open-terminal:stop'),
+  syncOpenTerminal: () => ipcRenderer.invoke('open-terminal:sync'),
   getOpenTerminalInfo: () => ipcRenderer.invoke('open-terminal:info'),
   getOpenTerminalStatus: () => ipcRenderer.invoke('open-terminal:status'),
   connectOpenTerminalPty: (onOutput: (data: string) => void) => {
@@ -172,7 +173,8 @@ const api = {
   getConnections: () => ipcRenderer.invoke('connections:list'),
   addConnection: (connection: any) => ipcRenderer.invoke('connections:add', connection),
   removeConnection: (id: string) => ipcRenderer.invoke('connections:remove', id),
-  updateConnection: (id: string, updates: any) => ipcRenderer.invoke('connections:update', id, updates),
+  updateConnection: (id: string, updates: any) =>
+    ipcRenderer.invoke('connections:update', id, updates),
   setDefaultConnection: (id: string) => ipcRenderer.invoke('connections:setDefault', id),
   connectTo: (id: string) => ipcRenderer.invoke('connections:connect', id),
   validateUrl: (url: string) => ipcRenderer.invoke('validate:url', url),

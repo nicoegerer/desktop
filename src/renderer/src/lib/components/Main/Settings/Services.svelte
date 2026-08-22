@@ -30,6 +30,10 @@
   let unsubscribe: (() => void) | null = null
   let filter = $state<'all' | 'running' | 'setup'>('all')
   let query = $state('')
+  let workspaceBusy = $state(false)
+  let workspaceError = $state('')
+  let workspaceMessage = $state('')
+  let workspacePath = $state('')
 
   const isGerman =
     typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('de')
@@ -86,6 +90,72 @@
     envEntries = []
     addMenuOpen = false
     editorOpen = true
+  }
+
+  const openGitHubPreset = async (): Promise<void> => {
+    error = ''
+    editorError = ''
+    const port = await window.electronAPI.suggestManagedServicePort()
+    draft = {
+      ...emptyService(port, 'mcpo'),
+      name: 'GitHub MCP',
+      mcpo: {
+        runnerCommand: 'uvx',
+        serverCommand: 'docker',
+        serverArgs: [
+          'run',
+          '-i',
+          '--rm',
+          '-e',
+          'GITHUB_PERSONAL_ACCESS_TOKEN',
+          'ghcr.io/github/github-mcp-server'
+        ],
+        port
+      },
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: '' }
+    }
+    argsText = draft.mcpo?.serverArgs.join('\n') ?? ''
+    envEntries = [{ key: 'GITHUB_PERSONAL_ACCESS_TOKEN', value: '' }]
+    addMenuOpen = false
+    editorOpen = true
+  }
+
+  const setupLocalWorkspace = async (): Promise<void> => {
+    workspaceError = ''
+    workspaceMessage = ''
+    const folder = await window.electronAPI.selectFolder()
+    if (!folder) return
+
+    workspaceBusy = true
+    workspacePath = folder
+    try {
+      const current = await window.electronAPI.getConfig()
+      await window.electronAPI.setConfig({
+        openTerminal: {
+          ...(current?.openTerminal ?? {}),
+          cwd: folder,
+          enabled: true
+        }
+      })
+      const result = await window.electronAPI.startOpenTerminal()
+      if (!result?.url) {
+        throw new Error(
+          l(
+            'Open Terminal konnte nicht gestartet werden. Öffne das Protokoll für Details.',
+            'Open Terminal could not be started. Open its log for details.'
+          )
+        )
+      }
+      await window.electronAPI.syncOpenTerminal()
+      workspaceMessage = l(
+        'Arbeitsbereich läuft und wurde mit Open WebUI synchronisiert. Wähle im Chat das Terminal-Symbol aus.',
+        'The workspace is running and synced with Open WebUI. Select the terminal icon in chat.'
+      )
+    } catch (cause) {
+      workspaceError = cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      workspaceBusy = false
+    }
   }
 
   const openEdit = async (service: ManagedServiceSnapshot): Promise<void> => {
@@ -204,6 +274,17 @@
     }
     if (assignedPortWarning()) {
       editorError = assignedPortWarning()
+      return
+    }
+    if (
+      draft.type === 'mcpo' &&
+      argsText.includes('ghcr.io/github/github-mcp-server') &&
+      !envEntries.find((entry) => entry.key === 'GITHUB_PERSONAL_ACCESS_TOKEN')?.value.trim()
+    ) {
+      editorError = l(
+        'Für diese GitHub-Docker-Vorlage ist ein GitHub Personal Access Token erforderlich.',
+        'This GitHub Docker preset requires a GitHub Personal Access Token.'
+      )
       return
     }
 
@@ -409,6 +490,21 @@
           <div
             class="absolute right-0 top-8 z-30 w-60 rounded-xl border border-black/10 bg-[#f8f8fa] p-1.5 shadow-xl dark:border-white/10 dark:bg-[#1b1b1d]"
           >
+            <button
+              class="mb-1 block w-full rounded-lg bg-emerald-500/10 px-2.5 py-2 text-left transition hover:bg-emerald-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+              onclick={openGitHubPreset}
+            >
+              <span
+                class="block text-[11px] font-medium text-emerald-700/85 dark:text-emerald-300/85"
+                >GitHub MCP</span
+              >
+              <span class="mt-0.5 block text-[9px] opacity-45">
+                {l(
+                  'Offizielle Docker-Vorlage; Token wird erst von dir eingetragen',
+                  'Official Docker preset; you provide the token'
+                )}
+              </span>
+            </button>
             {#each [['mcpo', 'MCP → OpenAPI', l('Lokalen MCP-Server über mcpo bereitstellen', 'Expose a local MCP server through mcpo')], ['generic', l('Lokaler Prozess', 'Local process'), l('Beliebiges Kommando starten und überwachen', 'Run and monitor any command')], ['remote', l('Remote-Endpunkt', 'Remote endpoint'), l('Vorhandenen HTTP(S)-Werkzeugserver verbinden', 'Connect an existing HTTP(S) tool server')]] as item (item[0])}
               <button
                 class="block w-full rounded-lg px-2.5 py-2 text-left transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
@@ -422,6 +518,56 @@
         {/if}
       </div>
     </div>
+  </div>
+
+  <div
+    class="mb-4 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.045] p-3.5 dark:border-emerald-400/15 dark:bg-emerald-400/[0.045]"
+  >
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="max-w-xl">
+        <div class="text-[12px] font-medium text-emerald-800/80 dark:text-emerald-200/80">
+          {l('Lokaler Coding-Arbeitsbereich', 'Local coding workspace')}
+        </div>
+        <div class="mt-1 text-[10px] leading-4 opacity-50">
+          {l(
+            'Verbindet einen von dir gewählten Ordner über Open Terminal. Das Modell kann dort Dateien erstellen und bearbeiten, Git verwenden sowie Builds und Tests ausführen.',
+            'Connects a folder you choose through Open Terminal. The model can create and edit files, use Git, and run builds and tests there.'
+          )}
+        </div>
+        <div class="mt-1 text-[9px] leading-4 text-amber-700/70 dark:text-amber-300/70">
+          {l(
+            'Direkter Host-Zugriff: Der Arbeitsordner ist der Startpunkt, aber keine Sicherheits-Sandbox. Nur mit vertrauenswürdigen Modellen verwenden.',
+            'Direct host access: the workspace folder is the starting point, not a security sandbox. Use only with trusted models.'
+          )}
+        </div>
+      </div>
+      <button
+        class="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-50"
+        disabled={workspaceBusy}
+        onclick={setupLocalWorkspace}
+      >
+        {workspaceBusy
+          ? l('Wird eingerichtet …', 'Setting up…')
+          : l('Ordner auswählen & verbinden', 'Choose folder & connect')}
+      </button>
+    </div>
+    {#if workspacePath}
+      <div class="mt-2 break-all font-mono text-[9px] opacity-40">{workspacePath}</div>
+    {/if}
+    {#if workspaceMessage}
+      <div
+        class="mt-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-[10px] text-emerald-700 dark:text-emerald-300"
+      >
+        {workspaceMessage}
+      </div>
+    {/if}
+    {#if workspaceError}
+      <div
+        class="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-[10px] text-red-600 dark:text-red-300"
+      >
+        {workspaceError}
+      </div>
+    {/if}
   </div>
 
   <div
@@ -655,6 +801,16 @@
             />
           </label>
         {:else if draft.mcpo}
+          {#if argsText.includes('ghcr.io/github/github-mcp-server')}
+            <div
+              class="col-span-2 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2 text-[10px] leading-4 text-emerald-800/75 dark:text-emerald-200/75"
+            >
+              {l(
+                'Offizieller GitHub-MCP-Server. Docker muss laufen. Trage unten ein Fine-grained Personal Access Token mit nur den benötigten Repository-Rechten ein; der Wert wird verschlüsselt gespeichert.',
+                'Official GitHub MCP server. Docker must be running. Enter a fine-grained Personal Access Token below with only the repository permissions you need; it is stored encrypted.'
+              )}
+            </div>
+          {/if}
           <label class="col-span-2 text-[11px] opacity-55"
             >{l('mcpo-Runner', 'mcpo runner')}
             <input
