@@ -26,14 +26,11 @@
   let logService = $state<ManagedServiceSnapshot | null>(null)
   let integration = $state<ManagedServiceIntegration | null>(null)
   let integrationName = $state('')
+  let integrationType = $state<ManagedServiceDefinition['type'] | null>(null)
   let importPreview = $state<ManagedServiceImportPreview | null>(null)
   let unsubscribe: (() => void) | null = null
   let filter = $state<'all' | 'running' | 'setup'>('all')
   let query = $state('')
-  let workspaceBusy = $state(false)
-  let workspaceError = $state('')
-  let workspaceMessage = $state('')
-  let workspacePath = $state('')
 
   const isGerman =
     typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('de')
@@ -92,70 +89,19 @@
     editorOpen = true
   }
 
-  const openGitHubPreset = async (): Promise<void> => {
+  const openGitHubPreset = (): void => {
     error = ''
     editorError = ''
-    const port = await window.electronAPI.suggestManagedServicePort()
     draft = {
-      ...emptyService(port, 'mcpo'),
+      ...emptyService(0, 'remote'),
       name: 'GitHub MCP',
-      mcpo: {
-        runnerCommand: 'uvx',
-        serverCommand: 'docker',
-        serverArgs: [
-          'run',
-          '-i',
-          '--rm',
-          '-e',
-          'GITHUB_PERSONAL_ACCESS_TOKEN',
-          'ghcr.io/github/github-mcp-server'
-        ],
-        port
-      },
-      env: { GITHUB_PERSONAL_ACCESS_TOKEN: '' }
+      remote: { url: 'https://api.githubcopilot.com/mcp/' },
+      accessToken: ''
     }
-    argsText = draft.mcpo?.serverArgs.join('\n') ?? ''
-    envEntries = [{ key: 'GITHUB_PERSONAL_ACCESS_TOKEN', value: '' }]
+    argsText = ''
+    envEntries = []
     addMenuOpen = false
     editorOpen = true
-  }
-
-  const setupLocalWorkspace = async (): Promise<void> => {
-    workspaceError = ''
-    workspaceMessage = ''
-    const folder = await window.electronAPI.selectFolder()
-    if (!folder) return
-
-    workspaceBusy = true
-    workspacePath = folder
-    try {
-      const current = await window.electronAPI.getConfig()
-      await window.electronAPI.setConfig({
-        openTerminal: {
-          ...(current?.openTerminal ?? {}),
-          cwd: folder,
-          enabled: true
-        }
-      })
-      const result = await window.electronAPI.startOpenTerminal()
-      if (!result?.url) {
-        throw new Error(
-          l(
-            'Open Terminal konnte nicht gestartet werden. Öffne das Protokoll für Details.',
-            'Open Terminal could not be started. Open its log for details.'
-          )
-        )
-      }
-      await window.electronAPI.syncOpenTerminal()
-      workspaceMessage = l(
-        'Arbeitsbereich läuft und wurde mit Open WebUI synchronisiert. Wähle im Chat das Terminal-Symbol aus.',
-        'The workspace is running and synced with Open WebUI. Select the terminal icon in chat.'
-      )
-    } catch (cause) {
-      workspaceError = cause instanceof Error ? cause.message : String(cause)
-    } finally {
-      workspaceBusy = false
-    }
   }
 
   const openEdit = async (service: ManagedServiceSnapshot): Promise<void> => {
@@ -272,6 +218,17 @@
       )
       return
     }
+    if (
+      draft.type === 'remote' &&
+      draft.remote?.url.includes('api.githubcopilot.com/mcp') &&
+      !draft.accessToken?.trim()
+    ) {
+      editorError = l(
+        'Für GitHub MCP ist ein Personal Access Token erforderlich.',
+        'GitHub MCP requires a Personal Access Token.'
+      )
+      return
+    }
     if (assignedPortWarning()) {
       editorError = assignedPortWarning()
       return
@@ -362,6 +319,7 @@
     try {
       integration = await window.electronAPI.getManagedServiceIntegration(service.id)
       integrationName = service.name
+      integrationType = service.type
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause)
     }
@@ -392,11 +350,23 @@
 
   const copy = async (value: string): Promise<void> => navigator.clipboard.writeText(value)
 
-  const dotClass = (status: ManagedServiceSnapshot['status']): string => {
-    if (status === 'running') return 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.6)]'
-    if (status === 'starting') return 'bg-amber-400 animate-pulse'
-    if (status === 'failed') return 'bg-red-400'
+  const dotClass = (service: ManagedServiceSnapshot): string => {
+    if (service.status === 'running' && service.type === 'remote') {
+      return 'bg-sky-400 shadow-[0_0_5px_rgba(56,189,248,0.5)]'
+    }
+    if (service.status === 'running') {
+      return 'bg-emerald-400 shadow-[0_0_5px_rgba(52,211,153,0.6)]'
+    }
+    if (service.status === 'starting') return 'bg-amber-400 animate-pulse'
+    if (service.status === 'failed') return 'bg-red-400'
     return 'bg-black/15 dark:bg-white/20'
+  }
+
+  const statusLabel = (service: ManagedServiceSnapshot): string => {
+    if (service.type !== 'remote') return service.status
+    if (service.status === 'running') return l('erreichbar', 'reachable')
+    if (service.status === 'stopped') return l('nicht geprüft', 'not checked')
+    return service.status
   }
 
   const generatedCommand = (): string => {
@@ -491,21 +461,20 @@
             class="absolute right-0 top-8 z-30 w-60 rounded-xl border border-black/10 bg-[#f8f8fa] p-1.5 shadow-xl dark:border-white/10 dark:bg-[#1b1b1d]"
           >
             <button
-              class="mb-1 block w-full rounded-lg bg-emerald-500/10 px-2.5 py-2 text-left transition hover:bg-emerald-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+              class="mb-1 block w-full rounded-lg bg-sky-500/10 px-2.5 py-2 text-left transition hover:bg-sky-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
               onclick={openGitHubPreset}
             >
-              <span
-                class="block text-[11px] font-medium text-emerald-700/85 dark:text-emerald-300/85"
+              <span class="block text-[11px] font-medium text-sky-700/85 dark:text-sky-300/85"
                 >GitHub MCP</span
               >
               <span class="mt-0.5 block text-[9px] opacity-45">
                 {l(
-                  'Offizielle Docker-Vorlage; Token wird erst von dir eingetragen',
-                  'Official Docker preset; you provide the token'
+                  'Offizieller Remote-Server; kein Docker erforderlich',
+                  'Official remote server; no Docker required'
                 )}
               </span>
             </button>
-            {#each [['mcpo', 'MCP → OpenAPI', l('Lokalen MCP-Server über mcpo bereitstellen', 'Expose a local MCP server through mcpo')], ['generic', l('Lokaler Prozess', 'Local process'), l('Beliebiges Kommando starten und überwachen', 'Run and monitor any command')], ['remote', l('Remote-Endpunkt', 'Remote endpoint'), l('Vorhandenen HTTP(S)-Werkzeugserver verbinden', 'Connect an existing HTTP(S) tool server')]] as item (item[0])}
+            {#each [['mcpo', 'MCP → OpenAPI', l('Lokalen MCP-Server über mcpo bereitstellen', 'Expose a local MCP server through mcpo')], ['generic', l('Lokaler Prozess', 'Local process'), l('Beliebiges Kommando starten und überwachen', 'Run and monitor any command')], ['remote', l('Remote-MCP', 'Remote MCP'), l('Vorhandenen Streamable-HTTP-MCP-Server verbinden', 'Connect an existing Streamable HTTP MCP server')]] as item (item[0])}
               <button
                 class="block w-full rounded-lg px-2.5 py-2 text-left transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 dark:hover:bg-white/10"
                 onclick={() => openAdd(item[0] as ManagedServiceDefinition['type'])}
@@ -518,56 +487,6 @@
         {/if}
       </div>
     </div>
-  </div>
-
-  <div
-    class="mb-4 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.045] p-3.5 dark:border-emerald-400/15 dark:bg-emerald-400/[0.045]"
-  >
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div class="max-w-xl">
-        <div class="text-[12px] font-medium text-emerald-800/80 dark:text-emerald-200/80">
-          {l('Lokaler Coding-Arbeitsbereich', 'Local coding workspace')}
-        </div>
-        <div class="mt-1 text-[10px] leading-4 opacity-50">
-          {l(
-            'Verbindet einen von dir gewählten Ordner über Open Terminal. Das Modell kann dort Dateien erstellen und bearbeiten, Git verwenden sowie Builds und Tests ausführen.',
-            'Connects a folder you choose through Open Terminal. The model can create and edit files, use Git, and run builds and tests there.'
-          )}
-        </div>
-        <div class="mt-1 text-[9px] leading-4 text-amber-700/70 dark:text-amber-300/70">
-          {l(
-            'Direkter Host-Zugriff: Der Arbeitsordner ist der Startpunkt, aber keine Sicherheits-Sandbox. Nur mit vertrauenswürdigen Modellen verwenden.',
-            'Direct host access: the workspace folder is the starting point, not a security sandbox. Use only with trusted models.'
-          )}
-        </div>
-      </div>
-      <button
-        class="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-50"
-        disabled={workspaceBusy}
-        onclick={setupLocalWorkspace}
-      >
-        {workspaceBusy
-          ? l('Wird eingerichtet …', 'Setting up…')
-          : l('Ordner auswählen & verbinden', 'Choose folder & connect')}
-      </button>
-    </div>
-    {#if workspacePath}
-      <div class="mt-2 break-all font-mono text-[9px] opacity-40">{workspacePath}</div>
-    {/if}
-    {#if workspaceMessage}
-      <div
-        class="mt-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-[10px] text-emerald-700 dark:text-emerald-300"
-      >
-        {workspaceMessage}
-      </div>
-    {/if}
-    {#if workspaceError}
-      <div
-        class="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-[10px] text-red-600 dark:text-red-300"
-      >
-        {workspaceError}
-      </div>
-    {/if}
   </div>
 
   <div
@@ -659,7 +578,7 @@
       <article
         class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-xl border border-transparent bg-black/[0.022] px-3 py-2.5 transition motion-reduce:transition-none hover:border-black/[0.06] hover:bg-black/[0.032] sm:grid-cols-[auto_minmax(150px,1fr)_auto] dark:bg-white/[0.028] dark:hover:border-white/[0.07] dark:hover:bg-white/[0.045]"
       >
-        <span class={`h-2 w-2 shrink-0 rounded-full ${dotClass(service.status)}`}></span>
+        <span class={`h-2 w-2 shrink-0 rounded-full ${dotClass(service)}`}></span>
         <div class="min-w-0">
           <div class="flex min-w-0 items-center gap-1.5">
             <span class="truncate text-[12px] font-medium opacity-75">{service.name}</span>
@@ -676,7 +595,7 @@
         <div
           class="col-span-2 ml-5 flex flex-wrap items-center justify-end gap-1 sm:col-span-1 sm:ml-0"
         >
-          <span class="mr-1 text-[9px] capitalize opacity-30">{service.status}</span>
+          <span class="mr-1 text-[9px] capitalize opacity-30">{statusLabel(service)}</span>
           <Switch
             checked={service.enabled}
             label={`${service.name} autostart`}
@@ -803,7 +722,7 @@
         {:else if draft.mcpo}
           {#if argsText.includes('ghcr.io/github/github-mcp-server')}
             <div
-              class="col-span-2 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2 text-[10px] leading-4 text-emerald-800/75 dark:text-emerald-200/75"
+              class="col-span-2 rounded-lg border border-sky-500/15 bg-sky-500/[0.06] px-3 py-2 text-[10px] leading-4 text-sky-800/75 dark:text-sky-200/75"
             >
               {l(
                 'Offizieller GitHub-MCP-Server. Docker muss laufen. Trage unten ein Fine-grained Personal Access Token mit nur den benötigten Repository-Rechten ein; der Wert wird verschlüsselt gespeichert.',
@@ -889,6 +808,16 @@
             </div>
           {/if}
         {:else if draft.type === 'remote' && draft.remote}
+          {#if draft.remote.url.includes('api.githubcopilot.com/mcp')}
+            <div
+              class="col-span-2 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2 text-[10px] leading-4 text-emerald-800/75 dark:text-emerald-200/75"
+            >
+              {l(
+                'Offizieller gehosteter GitHub-MCP-Server. Kein Docker nötig. Verwende ein Fine-grained Personal Access Token mit nur den benötigten Repository-Rechten; der Token wird lokal verschlüsselt gespeichert.',
+                'Official hosted GitHub MCP server. Docker is not required. Use a fine-grained Personal Access Token with only the repository permissions you need; the token is encrypted locally.'
+              )}
+            </div>
+          {/if}
           <label class="col-span-2 text-[11px] opacity-55"
             >{l('HTTP(S)-Endpunkt', 'HTTP(S) endpoint')}
             <input
@@ -1027,12 +956,21 @@
       onclick={(event) => event.stopPropagation()}
     >
       <h3 class="m-0 text-[14px] font-medium">{integrationName}: Open WebUI</h3>
-      <p class="text-[11px] opacity-45">
-        {l(
-          'Unter Integrationen → Externe Werkzeug-Server mit Auth-Typ „Bearer“ eintragen. Im Schlüssel-Feld nur den Wert ohne „Bearer “ verwenden und einen alten Schlüssel vollständig ersetzen:',
-          'Enter these values under Integrations → External Tool Servers using the “Bearer” auth type. Put only the value without “Bearer ” in the key field and fully replace any old key:'
-        )}
-      </p>
+      {#if integrationType === 'remote'}
+        <p class="text-[11px] opacity-45">
+          {l(
+            'In Open WebUI als Administrator unter Admin-Einstellungen → Integrationen → Server hinzufügen eintragen. Typ „MCP (Streamable HTTP)“ und Auth-Typ „Bearer“ wählen. Im Schlüssel-Feld nur den Token ohne „Bearer “ eintragen:',
+            'In Open WebUI, open Admin Settings → Integrations → Add Server. Select “MCP (Streamable HTTP)” and the “Bearer” auth type. Enter only the token value without the “Bearer ” prefix:'
+          )}
+        </p>
+      {:else}
+        <p class="text-[11px] opacity-45">
+          {l(
+            'Unter Einstellungen → Integrationen → Werkzeug-Server hinzufügen den Typ „OpenAPI“ und Auth-Typ „Bearer“ wählen. Im Schlüssel-Feld nur den Wert ohne „Bearer “ verwenden und einen alten Schlüssel vollständig ersetzen:',
+            'Under Settings → Integrations → Add Tool Server, select “OpenAPI” and the “Bearer” auth type. Put only the value without “Bearer ” in the key field and fully replace any old key:'
+          )}
+        </p>
+      {/if}
       {#each [[l('URL', 'URL'), integration.url], [l('Bearer-Key', 'Bearer key'), integration.bearerKey], [l('Kommando', 'Command'), integration.commandPreview]] as item (item[0])}
         <div class="mb-2 rounded-xl bg-black/[0.035] p-3 dark:bg-white/[0.05]">
           <div class="mb-1 flex items-center justify-between">
