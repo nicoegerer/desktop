@@ -13,21 +13,29 @@ Open **Settings → Services & Connectors → Add** and choose one of these adap
    the operating system credential store when available.
 2. **Local process** for any long-running command. A health-check URL is optional and restricted to
    localhost.
-3. **Remote endpoint** for an existing HTTP(S) tool server. An optional bearer token is stored with
-   the operating system's credential encryption when available.
+3. **Remote MCP** for an existing Streamable HTTP MCP server. An optional bearer token is stored
+   with the operating system's credential encryption when available.
 
 Click a service in the bottom status bar to open its logs in the same resizable panel used by Open
 WebUI, Open Terminal, and llama.cpp. Right-click a running local service to stop it.
 
 ## Work on local projects
 
-The **Local coding workspace** card is the shortest path from chat to an actual project:
+The **Workspace** button in the bottom chat status bar is the shortest path from chat to an actual
+project. It stays outside the Services & Connectors settings because it controls the current local
+chat workspace rather than adding another connector:
 
-1. Choose a folder. Nothing is selected on a fresh installation.
-2. The desktop app starts Open Terminal in that folder and registers it only in the bundled local
-   Open WebUI instance.
-3. In an Open WebUI chat, select the terminal icon. A tool-capable model can then create and edit
-   files, run commands, use Git, install project dependencies, and execute builds and tests.
+1. Click **Choose workspace** and select an existing checkout or a folder for a new project. Nothing
+   is selected on a fresh installation, and the active path remains visible after selection.
+2. The desktop app starts or restarts Open Terminal in that exact folder and registers it only in
+   the bundled local Open WebUI instance.
+3. In an Open WebUI chat, click the cloud icon and select **Local Open Terminal**. A tool-capable
+   model can then create and edit files, run commands, use Git, install project dependencies, and
+   execute builds and tests.
+
+If a response mentions only `/mnt/uploads`, the chat used Open WebUI's isolated code interpreter
+instead of Local Open Terminal. Select **Local Open Terminal** from the cloud menu for host-folder
+access. Open WebUI currently requires this tool selection per chat.
 
 OmniRoute supplies models; it does not forward the local tools of a separate Codex or Claude Code
 process. Open WebUI needs its own Open Terminal connection for agentic workspace access.
@@ -41,14 +49,21 @@ operating system supports it.
 ## GitHub MCP preset
 
 Choose **Add → GitHub MCP** for an optional template based on GitHub's official MCP server. The
-template uses Docker, keeps autostart disabled, and does not contain an account or token. Docker must
-be running, and the user must enter a fine-grained `GITHUB_PERSONAL_ACCESS_TOKEN` with only the
-repository permissions needed for the intended tasks. Environment values are encrypted locally and
-excluded from registry exports.
+template uses the official hosted endpoint at `https://api.githubcopilot.com/mcp/`, does not require
+Docker, and does not contain an account or token. The user must enter a fine-grained Personal Access
+Token with only the repository permissions needed for the intended tasks. The token is encrypted
+locally and excluded from registry exports.
+
+After saving, add it in the bundled Open WebUI under **Admin Settings → Integrations → Add Server**
+as **MCP (Streamable HTTP)** with **Bearer** authentication. A blue **reachable** status in the
+desktop registry only confirms that the remote endpoint answered; Open WebUI connection and tool
+activation remain separate steps.
 
 GitHub MCP handles GitHub APIs such as repositories, issues, and pull requests. Open Terminal handles
 the checked-out files, shell, Git CLI, builds, and tests on the local machine. Use both when a task
-needs local implementation plus GitHub collaboration.
+needs local implementation plus GitHub collaboration. Connecting GitHub MCP alone does not mount a
+repository as a local working tree; choose a local checkout with the chat Workspace button or clone
+the repository from Local Open Terminal into the selected folder.
 
 ## Windows and `uvx`
 

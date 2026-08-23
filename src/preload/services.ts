@@ -6,9 +6,10 @@ import type {
   ManagedServiceIntegration,
   ManagedServiceSnapshot
 } from '../shared/services/types'
+import { toIpcPlainValue } from './ipc-serialization'
 
 const request = <T>(action: string, payload: Record<string, unknown> = {}): Promise<T> =>
-  ipcRenderer.invoke('managed-services:request', { action, ...payload })
+  ipcRenderer.invoke('managed-services:request', toIpcPlainValue({ action, ...payload }))
 
 export const managedServicesApi = {
   listManagedServices: (): Promise<ManagedServiceSnapshot[]> => request('list'),

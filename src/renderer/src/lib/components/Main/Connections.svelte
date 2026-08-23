@@ -74,6 +74,9 @@
   let llamaCppInfo = $state<{ url?: string; pid?: number } | null>(null)
   let llamaCppSetupStatus = $state('')
   let openTerminalSetupStatus = $state('')
+  let workspaceBusy = $state(false)
+  let workspaceFeedback = $state<{ kind: 'success' | 'error'; message: string } | null>(null)
+  let workspaceFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 
   const startInstall = async (options?: {
     installOpenTerminal?: boolean
@@ -583,6 +586,79 @@
     })
   })
 
+  onDestroy(() => {
+    if (workspaceFeedbackTimer) clearTimeout(workspaceFeedbackTimer)
+  })
+
+  const showWorkspaceFeedback = (kind: 'success' | 'error', message: string): void => {
+    workspaceFeedback = { kind, message }
+    if (workspaceFeedbackTimer) clearTimeout(workspaceFeedbackTimer)
+    workspaceFeedbackTimer = setTimeout(
+      () => (workspaceFeedback = null),
+      kind === 'error' ? 9000 : 7000
+    )
+  }
+
+  const comparableWorkspacePath = (value: string): string => {
+    const normalized = value.trim().replace(/[\\/]+$/, '')
+    return /^[a-z]:[\\/]/i.test(normalized) ? normalized.toLowerCase() : normalized
+  }
+
+  const chooseWorkspace = async (): Promise<void> => {
+    const folder = await window.electronAPI.selectFolder()
+    if (!folder) return
+
+    workspaceBusy = true
+    workspaceFeedback = null
+    try {
+      const currentConfig = await window.electronAPI.getConfig()
+      const currentInfo = await window.electronAPI.getOpenTerminalInfo()
+      const sameWorkspace =
+        comparableWorkspacePath(currentInfo?.workingDirectory ?? '') ===
+        comparableWorkspacePath(folder)
+
+      await window.electronAPI.setConfig({
+        openTerminal: {
+          ...(currentConfig?.openTerminal ?? {}),
+          cwd: folder,
+          enabled: true
+        }
+      })
+      config.set(await window.electronAPI.getConfig())
+
+      if (currentInfo?.status === 'started' && !sameWorkspace) {
+        openTerminalStatus = 'stopping'
+        const stopped = await window.electronAPI.stopOpenTerminal()
+        if (!stopped) throw new Error('Open Terminal could not be restarted for the new workspace.')
+        openTerminalInfo = null
+        openTerminalStatus = null
+      }
+
+      const result =
+        currentInfo?.status === 'started' && sameWorkspace
+          ? currentInfo
+          : await window.electronAPI.startOpenTerminal()
+      if (!result?.url || !result?.workingDirectory) {
+        throw new Error('Open Terminal could not be started for the selected workspace.')
+      }
+
+      openTerminalInfo = result
+      openTerminalStatus = 'started'
+      openTerminalInstalled = true
+      const synced = await window.electronAPI.syncOpenTerminal()
+      if (!synced) throw new Error('The workspace could not be registered in Open WebUI.')
+
+      showWorkspaceFeedback(
+        'success',
+        `Workspace ready: ${result.workingDirectory}. In the chat, click the cloud icon and select “Local Open Terminal”.`
+      )
+    } catch (cause) {
+      showWorkspaceFeedback('error', cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      workspaceBusy = false
+    }
+  }
+
   const toggleOpenTerminal = async () => {
     if (openTerminalStatus === 'starting') return
     if (openTerminalStatus === 'started') {
@@ -731,6 +807,18 @@
     />
   {/if}
 
+  {#if workspaceFeedback}
+    <div
+      class="fixed bottom-10 left-1/2 z-[100] max-w-[min(680px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border px-4 py-2.5 text-[11px] shadow-xl backdrop-blur {workspaceFeedback.kind ===
+      'success'
+        ? 'border-emerald-500/25 bg-emerald-950/90 text-emerald-100'
+        : 'border-red-500/25 bg-red-950/90 text-red-100'}"
+      role={workspaceFeedback.kind === 'error' ? 'alert' : 'status'}
+    >
+      {workspaceFeedback.message}
+    </div>
+  {/if}
+
   <StatusBar
     {serverStatus}
     {serverReachable}
@@ -741,6 +829,8 @@
     llamaCppInstalled={!!llamaCppInfo?.binaryPath}
     {activeLog}
     activeManagedServiceId={activeManagedService?.id ?? null}
+    workspacePath={openTerminalInfo?.workingDirectory ?? $config?.openTerminal?.cwd ?? ''}
+    {workspaceBusy}
     onSelectLog={selectLog}
     onSelectManagedService={selectManagedService}
     onStartServer={async () => {
@@ -757,5 +847,6 @@
     }}
     onToggleOpenTerminal={toggleOpenTerminal}
     onToggleLlamaCpp={toggleLlamaCpp}
+    onChooseWorkspace={chooseWorkspace}
   />
 </div>

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Workspace control in chat.** The local coding workspace picker now lives in the persistent chat
+  status bar. Its selected path remains visible, and changing folders restarts Open Terminal in the
+  new working directory before synchronizing it with Open WebUI.
+- **Hosted GitHub MCP preset.** The optional GitHub template now uses GitHub's official hosted MCP
+  endpoint instead of requiring Docker. A user-supplied fine-grained token is still required and is
+  encrypted locally. Remote endpoints use a blue “reachable” state so they are not confused with a
+  locally running or already connected service.
+
 ### Added
 
 - **Agentic Local Workspaces.** A guided Services card lets users choose a project folder, start Open
@@ -18,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Service editor could not save.** Svelte state proxies are converted to plain IPC values before
+  Electron receives them, fixing `An object could not be cloned.` for Garmin MCP, GitHub MCP, and
+  other connectors.
+- **Misleading workspace state.** Reopening the app now shows the active folder in the chat status
+  bar instead of presenting an empty picker while Open Terminal is still using an older directory.
+- **Connection instructions.** The integration dialog now distinguishes Garmin-style mcpo/OpenAPI
+  connectors from native Streamable HTTP MCP servers such as GitHub.
 - **MCP Connector Form Errors Hidden Behind the Dialog.** Validation and save failures now appear
   inside the service editor, so a rejected port or invalid field no longer looks like an inactive
   Save button.
