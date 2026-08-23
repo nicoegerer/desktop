@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.5] - 2026-08-23
+
+### Fixed
+
+- **Garmin MCP could not be saved.** Managed-service form values are now converted from Svelte state
+  proxies before they cross Electron's `contextBridge`, fixing `An object could not be cloned.` for
+  Garmin MCP and other nested service definitions.
+- **mcpo key mismatches.** New MCP connectors always receive a cryptographically secure generated
+  bearer key. The same encrypted key is used by the local mcpo process and the Open WebUI connection,
+  preventing `403 – Invalid API key` caused by independently entered values.
+
 ## [0.0.20-services.4] - 2026-08-23
 
 ### Changed

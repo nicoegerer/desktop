@@ -1,8 +1,7 @@
 /**
- * Electron IPC cannot structured-clone Svelte 5's deeply nested state proxies.
- * Managed-service requests only contain JSON data, so serializing once at the
- * preload boundary both removes proxies and gives every caller a clone-safe
- * payload.
+ * Electron contextBridge and IPC cannot structured-clone Svelte 5 state proxies.
+ * Managed-service requests only contain JSON data, so callers convert them before
+ * crossing either Electron boundary.
  */
 export const toIpcPlainValue = <T>(value: T): T => {
   const serialized = JSON.stringify(value)

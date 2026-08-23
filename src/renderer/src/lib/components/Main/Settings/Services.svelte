@@ -7,6 +7,7 @@
     ManagedServiceIntegration,
     ManagedServiceSnapshot
   } from '../../../../../../shared/services/types'
+  import { toIpcPlainValue } from '../../../../../../shared/services/ipc-serialization'
   import Switch from '../../common/Switch.svelte'
   import ManagedServiceLogs from '../../../services/ManagedServiceLogs.svelte'
 
@@ -118,14 +119,16 @@
     if (!draft || draft.type !== 'mcpo' || !draft.mcpo?.serverCommand.trim()) return
     const apiKey = draft.apiKey
     try {
-      const preview = await window.electronAPI.previewManagedService({
-        ...draft,
-        id: draft.id || undefined,
-        mcpo: {
-          ...draft.mcpo,
-          serverArgs: argsText.split(/\r?\n/).filter((entry) => entry.length > 0)
-        }
-      })
+      const preview = await window.electronAPI.previewManagedService(
+        toIpcPlainValue({
+          ...draft,
+          id: draft.id || undefined,
+          mcpo: {
+            ...draft.mcpo,
+            serverArgs: argsText.split(/\r?\n/).filter((entry) => entry.length > 0)
+          }
+        })
+      )
       draft = { ...preview, id: draft.id, apiKey }
       editorError = ''
     } catch (cause) {
@@ -254,6 +257,7 @@
       id: draft.id || undefined,
       name: draft.name.trim(),
       env,
+      apiKey: draft.type === 'mcpo' && !draft.id ? '' : draft.apiKey,
       ...(draft.type === 'generic'
         ? { args: parsedArgs, mcpo: undefined, remote: undefined, accessToken: undefined }
         : draft.type === 'mcpo'
@@ -267,7 +271,7 @@
 
     saving = true
     try {
-      const saved = await window.electronAPI.saveManagedService(payload)
+      const saved = await window.electronAPI.saveManagedService(toIpcPlainValue(payload))
       updateStatus(saved)
       editorOpen = false
       draft = null
@@ -286,7 +290,9 @@
   ): Promise<void> => {
     try {
       const full = await window.electronAPI.getManagedService(service.id)
-      updateStatus(await window.electronAPI.saveManagedService({ ...full, enabled }))
+      updateStatus(
+        await window.electronAPI.saveManagedService(toIpcPlainValue({ ...full, enabled }))
+      )
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause)
     }
@@ -754,25 +760,32 @@
               onchange={refreshMcpoPreview}
             />
           </label>
-          <label class="col-span-2 text-[11px] opacity-55"
-            >{l('mcpo API-Key (optional, verschlüsselt)', 'mcpo API key (optional, encrypted)')}
-            <input
-              type="password"
-              autocomplete="new-password"
-              class="mt-1 w-full rounded-lg border-none bg-black/5 px-3 py-2 font-mono outline-none dark:bg-white/10"
-              placeholder={l(
-                'Leer lassen, um einen sicheren Schlüssel zu erzeugen',
-                'Leave empty to generate a secure key'
-              )}
-              bind:value={draft.apiKey}
-            />
-            <span class="mt-1 block text-[9px] leading-4 opacity-45">
+          {#if draft.id}
+            <label class="col-span-2 text-[11px] opacity-55"
+              >{l('mcpo API-Key (verschlüsselt)', 'mcpo API key (encrypted)')}
+              <input
+                type="password"
+                autocomplete="new-password"
+                class="mt-1 w-full rounded-lg border-none bg-black/5 px-3 py-2 font-mono outline-none dark:bg-white/10"
+                bind:value={draft.apiKey}
+              />
+              <span class="mt-1 block text-[9px] leading-4 opacity-45">
+                {l(
+                  'Nur ändern, wenn der Bearer-Key bewusst rotiert werden soll.',
+                  'Only change this when intentionally rotating the bearer key.'
+                )}
+              </span>
+            </label>
+          {:else}
+            <div
+              class="col-span-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[10px] leading-4 text-emerald-700 dark:text-emerald-300"
+            >
               {l(
-                'Bei einem bereits eingerichteten Open-WebUI-Eintrag denselben Schlüssel verwenden oder nach dem Speichern den neu erzeugten Bearer-Key übernehmen.',
-                'Reuse the key from an existing Open WebUI entry, or copy the newly generated bearer key after saving.'
+                'Beim Speichern wird automatisch ein sicherer API-Schlüssel erzeugt. Über „Verbindung“ wird exakt dieser Schlüssel an Open WebUI übergeben – dadurch entsteht kein 403 durch unterschiedliche Keys.',
+                'A secure API key is generated automatically when saving. “Connection” passes that exact key to Open WebUI, preventing 403 errors caused by mismatched keys.'
               )}
-            </span>
-          </label>
+            </div>
+          {/if}
           <label class="text-[11px] opacity-55"
             >{l('Port', 'Port')}
             <input
