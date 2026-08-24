@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.10] - 2026-08-24
+
+### Fixed
+
+- **The app never got past its loading spinner.** The workspace chip injected into the Open WebUI
+  page patched `fetch` and forwarded its own receiver to the real one. Open WebUI's bundles are
+  strict-mode modules, so a bare `fetch(...)` arrives with an undefined `this` and the browser
+  rejects the call outright — every request in the page failed. The patch now always calls `fetch`
+  bound to `window`.
+- **Rendering could drive itself in a loop.** The chip's label was written on every pass, and
+  assigning `textContent` replaces a text node, which the observer watching the page reports. Each
+  render therefore scheduled the next one. Writes now happen only when the value differs, and the
+  observer goes through a frame-debounced scheduler that skips rounds caused by the chip's own
+  changes.
+- **A failure in the chip can no longer take the chat with it.** Everything past the request
+  rewriting is wrapped, so a problem there leaves the page exactly as Open WebUI built it.
+
 ## [0.0.20-services.9] - 2026-08-24
 
 ### Changed
