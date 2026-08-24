@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { toIpcPlainValue } from '../src/preload/ipc-serialization.ts'
+import { toIpcPlainValue } from '../src/shared/services/ipc-serialization.ts'
 
-test('managed-service payloads with nested Svelte-like proxies become clone-safe', () => {
+test('managed-service payloads become clone-safe before crossing contextBridge', () => {
   const restartPolicy = new Proxy({ limit: 3, timeoutMs: 120_000 }, {})
   const service = new Proxy(
     {
@@ -15,10 +15,12 @@ test('managed-service payloads with nested Svelte-like proxies become clone-safe
     {}
   )
 
-  assert.throws(() => structuredClone({ action: 'upsert', service }), /clone/i)
+  const crossContextBridge = (value: unknown): unknown => structuredClone(value)
+
+  assert.throws(() => crossContextBridge({ action: 'upsert', service }), /clone/i)
 
   const plain = toIpcPlainValue({ action: 'upsert', service })
-  assert.doesNotThrow(() => structuredClone(plain))
+  assert.doesNotThrow(() => crossContextBridge(plain))
   assert.deepEqual(plain, {
     action: 'upsert',
     service: {

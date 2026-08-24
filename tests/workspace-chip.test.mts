@@ -60,6 +60,7 @@ interface Harness {
   mutate: () => void
   flushFrames: (rounds?: number) => void
   settle: (rounds?: number) => Promise<void>
+  storage: () => Record<string, string>
   renderCount: () => number
 }
 
@@ -224,6 +225,7 @@ const run = (seed?: Record<string, unknown>): Harness => {
     window: win,
     calls,
     bridge,
+    storage: () => store,
     mutate: () => notify(),
     settle: async (rounds = 50) => {
       for (let i = 0; i < rounds; i++) {
@@ -325,4 +327,44 @@ test('the same folder used by two conversations is reported once', async () => {
 
   const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
   assert.deepEqual(keepAlive[0].ids, ['desktop-ws-aaa'])
+})
+
+// ─── A draft becoming a real conversation ───────────────
+
+test('the workspace picked before sending survives the chat getting an id', async () => {
+  const h = run({ draft: { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' } })
+  // The harness starts on /c/chat-123, which is what Open WebUI navigates to
+  // once the first message creates the conversation.
+  await h.settle()
+
+  const stored = JSON.parse(String(h.storage()['desktop:workspace-selection']))
+  assert.ok(!stored.draft, 'the draft slot should have been handed over')
+  assert.equal(stored['chat-123'].repoFullName, 'nicoegerer/test1')
+})
+
+test('an existing conversation is not overwritten by a leftover draft', async () => {
+  const h = run({
+    draft: { mode: 'cloud', repoFullName: 'nicoegerer/other', branch: 'main' },
+    'chat-123': { mode: 'local', terminalId: 'desktop-ws-aaa', label: 'test1' }
+  })
+  await h.settle()
+
+  const stored = JSON.parse(String(h.storage()['desktop:workspace-selection']))
+  assert.equal(stored['chat-123'].label, 'test1')
+})
+
+test('a mounted repository is kept alive like a folder', async () => {
+  const h = run({
+    'chat-123': {
+      mode: 'cloud',
+      repoFullName: 'nicoegerer/test1',
+      branch: 'main',
+      terminalId: 'desktop-gh-abc123def456',
+      label: 'nicoegerer/test1'
+    }
+  })
+  await h.settle()
+
+  const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
+  assert.deepEqual(keepAlive[0].ids, ['desktop-gh-abc123def456'])
 })

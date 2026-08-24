@@ -128,6 +128,8 @@ export interface WorkspaceTerminalTarget {
   cwd: string
   url: string | null
   apiKey: string | null
+  /** Shown in the chat's terminal menu; defaults to the folder name. */
+  name?: string
 }
 
 const terminalEntry = (
@@ -185,13 +187,13 @@ export const mergeTerminalServers = (
 
     const terminal = managed.get(id)
     if (!terminal) continue // workspace was closed in the desktop app
-    merged.push(terminalEntry(terminal, entry, workspaceDisplayName(terminal.cwd)))
+    merged.push(terminalEntry(terminal, entry, terminal.name || workspaceDisplayName(terminal.cwd)))
     applied.add(id)
   }
 
   for (const [id, terminal] of managed) {
     if (!applied.has(id)) {
-      merged.push(terminalEntry(terminal, null, workspaceDisplayName(terminal.cwd)))
+      merged.push(terminalEntry(terminal, null, terminal.name || workspaceDisplayName(terminal.cwd)))
     }
   }
 

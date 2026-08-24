@@ -88,6 +88,13 @@ import {
 } from './utils/huggingface'
 
 import { initializeManagedServices, getManagedServicesManager } from './services'
+import {
+  configureGithubFs,
+  listGithubMounts,
+  mountGithubRepo,
+  stopGithubFs,
+  unmountGithubRepos
+} from './services/github-fs'
 
 import {
   cancelOpenWebUISync,
@@ -1268,6 +1275,9 @@ if (!gotTheLock) {
       onResult: (result) => sendToRenderer('open-webui:sync', result)
     })
 
+    // The repository view reuses the connector's token; it never asks for one.
+    configureGithubFs(() => getManagedServicesManager()?.getGithubAccessToken() ?? null)
+
     void initializeManagedServices().then(() => {
       getManagedServicesManager()?.onChange(() => scheduleOpenWebUISync())
       scheduleOpenWebUISync()
@@ -2063,6 +2073,7 @@ if (!gotTheLock) {
     ipcMain.handle('workspace:chip:keep-alive', async (_event, keep: string[]) => {
       try {
         const wanted = new Set(Array.isArray(keep) ? keep.filter((id) => typeof id === 'string') : [])
+        const unmounted = unmountGithubRepos(wanted)
         const stopped: string[] = []
         for (const terminal of listWorkspaceTerminals()) {
           if (wanted.has(terminal.id)) continue
@@ -2070,8 +2081,11 @@ if (!gotTheLock) {
           await setWorkspaceActive(terminal.cwd, false)
           stopped.push(terminal.cwd)
         }
-        if (stopped.length) {
-          log.info(`Released ${stopped.length} unused workspace(s): ${stopped.join(', ')}`)
+        if (stopped.length || unmounted) {
+          log.info(
+            `Released ${stopped.length} folder(s) and ${unmounted} repository mount(s)` +
+              (stopped.length ? `: ${stopped.join(', ')}` : '')
+          )
           sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
           if (!listWorkspaceTerminals().length) sendToRenderer('status:open-terminal', 'stopped')
           await syncOpenWebUI()
@@ -2081,6 +2095,34 @@ if (!gotTheLock) {
         return chipError(cause)
       }
     })
+
+    // A cloud workspace is browsable without a checkout: the repository is
+    // mounted read-only and registered as a terminal server, so the file panel
+    // has something to show. Writing stays with the GitHub connector.
+    ipcMain.handle(
+      'workspace:chip:cloud',
+      async (_event, repo: { repoFullName: string; branch: string }) => {
+        try {
+          if (!repo?.repoFullName || !repo?.branch) throw new Error('A repository is required')
+          if (!getManagedServicesManager()?.getGithubAccessToken()) {
+            throw new Error(
+              'Add the GitHub connector under Settings → Services & Connectors first.'
+            )
+          }
+          const mount = await mountGithubRepo({
+            repoFullName: String(repo.repoFullName),
+            branch: String(repo.branch)
+          })
+          const sync = await syncOpenWebUI()
+          if (sync.status === 'failed') {
+            throw new Error('The repository could not be registered in Open WebUI.')
+          }
+          return { ok: true, terminal: { id: mount.id, name: mount.name } }
+        } catch (cause) {
+          return chipError(cause)
+        }
+      }
+    )
 
     ipcMain.handle('workspace:chip:open', async (_event, workspacePath: string) => {
       try {
@@ -2477,6 +2519,7 @@ if (!gotTheLock) {
   app.on('before-quit', async () => {
     isQuiting = true
     cancelOpenWebUISync()
+    await stopGithubFs()
     await stopLlamaCpp()
     await stopAllWorkspaceTerminals()
     await stopServerHandler()

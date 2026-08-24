@@ -194,6 +194,11 @@ const api = {
     ipcRenderer.invoke('workspace:chip:open', request?.path),
   workspaceKeepAlive: (request: { ids: string[] }) =>
     ipcRenderer.invoke('workspace:chip:keep-alive', request?.ids ?? []),
+  workspaceMountRepo: (request: { repoFullName: string; branch: string }) =>
+    ipcRenderer.invoke('workspace:chip:cloud', {
+      repoFullName: request?.repoFullName,
+      branch: request?.branch
+    }),
 
   syncOpenWebUI: () => ipcRenderer.invoke('open-webui:sync'),
 

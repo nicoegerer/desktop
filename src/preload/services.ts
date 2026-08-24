@@ -7,7 +7,7 @@ import type {
   ManagedServiceSnapshot,
   ManagedServiceToolTarget
 } from '../shared/services/types'
-import { toIpcPlainValue } from './ipc-serialization'
+import { toIpcPlainValue } from '../shared/services/ipc-serialization'
 
 const request = <T>(action: string, payload: Record<string, unknown> = {}): Promise<T> =>
   ipcRenderer.invoke('managed-services:request', toIpcPlainValue({ action, ...payload }))
