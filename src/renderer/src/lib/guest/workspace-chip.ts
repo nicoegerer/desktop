@@ -214,6 +214,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
    * it is null. Reports whether the page ended up in the requested state.
    */
   var driveSelection = function (wanted, done) {
+    // Our own panel carries entries with the same names, so it is closed first
+    // — otherwise the search below could find one of those instead.
+    closePanel();
+
     var button = markTerminalMenu();
     if (!button) { done(false); return; }
 
@@ -222,17 +226,29 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     if (!wanted && !current) { done(true); return; }
 
     button.click();
-    setTimeout(function () {
-      // Clearing works by toggling the entry that is currently selected.
+
+    // The menu content is rendered by the page, so it may take a few frames to
+    // appear. Poll rather than guess a delay.
+    var attempts = 0;
+    var tryPick = function () {
+      // Clearing works by toggling off whatever is selected right now.
       var target = entryWithText(wanted || current, button);
-      if (target) target.click();
-      setTimeout(function () {
-        var now = (button.textContent || '').trim();
-        var ok = wanted ? now === wanted : !now;
-        if (!ok && target === null) button.click(); // leave the menu closed
-        done(ok);
-      }, 80);
-    }, 80);
+      if (target) {
+        target.click();
+        setTimeout(function () {
+          var now = (button.textContent || '').trim();
+          done(wanted ? now === wanted : !now);
+        }, 120);
+        return;
+      }
+      if (++attempts > 20) {
+        button.click(); // leave the menu as we found it
+        done(false);
+        return;
+      }
+      setTimeout(tryPick, 50);
+    };
+    setTimeout(tryPick, 50);
   };
 
   var applySelection = function (selected, done) {
@@ -251,13 +267,25 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     return s.label || t('Lokal', 'Local');
   };
 
-  var button = function (text, onClick, active) {
+  var button = function (text, onClick, active, icon) {
     var b = document.createElement('button');
     b.type = 'button';
-    b.textContent = text;
+    if (icon) {
+      var slot = document.createElement('span');
+      slot.style.cssText = 'display:inline-flex;flex:0 0 auto;opacity:.65;';
+      slot.innerHTML = icon;
+      var caption = document.createElement('span');
+      caption.style.cssText = 'overflow:hidden;text-overflow:ellipsis;';
+      caption.textContent = text;
+      b.appendChild(slot);
+      b.appendChild(caption);
+    } else {
+      b.textContent = text;
+    }
     b.style.cssText =
-      'all:unset;box-sizing:border-box;display:block;width:100%;padding:6px 10px;border-radius:8px;' +
-      'font-size:12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
+      'all:unset;box-sizing:border-box;display:flex;align-items:center;gap:7px;width:100%;' +
+      'padding:6px 10px;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;' +
+      'overflow:hidden;text-overflow:ellipsis;' +
       (active ? 'background:rgba(127,127,127,.18);' : '');
     b.onmouseenter = function () { b.style.background = 'rgba(127,127,127,.14)'; };
     b.onmouseleave = function () { b.style.background = active ? 'rgba(127,127,127,.18)' : 'transparent'; };
@@ -323,7 +351,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       wait.style.cssText = 'padding:10px;font-size:12px;opacity:.5;';
       list.appendChild(wait);
     } else if (mode === 'local') {
-      list.appendChild(button('📁  ' + t('Ordner öffnen …', 'Open a folder …'), function () {
+      list.appendChild(button(t('Ordner öffnen …', 'Open a folder …'), function () {
         ask('workspaceChooseFolder').then(function (result) {
           if (result && result.ok && result.path) openLocal(result.path, result.name);
         });
@@ -357,7 +385,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
             .filter(function (r) { return !q || r.fullName.toLowerCase().indexOf(q) !== -1; })
             .slice(0, 60)
             .forEach(function (r) {
-              results.appendChild(button('</>  ' + r.fullName, function () {
+              results.appendChild(button(r.fullName, function () {
                 select({ mode: 'cloud', repoFullName: r.fullName, branch: r.defaultBranch });
                 closePanel();
               }, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName));

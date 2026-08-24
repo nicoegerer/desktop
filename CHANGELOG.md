@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.12] - 2026-08-24
+
+### Fixed
+
+- **Leaving a local workspace for a cloud one did not clear Open WebUI's selection.** Deselecting was
+  given a fixed moment to find the menu entry, which the page often had not rendered yet, so the
+  cloud menu reappeared next to the chip and the file browser kept showing the local folder. The
+  entry is now polled for, and the chip's own panel is closed first so its identically named entries
+  cannot be picked by mistake.
+- **The folder emoji was still in the picker.** Only the chip had been converted; the entries in the
+  panel now use the same line icons.
+
+### Notes
+
+A connector that is active in every conversation is also sent in every request. Garmin alone exposes
+135 operations, about 49 KB of schema, which is why a short question already arrives at the model
+with roughly 34,000 prompt tokens. A capable model handles that; a small one tends to answer in prose
+instead of calling anything. The per-connector `function_name_filter_list` in Open WebUI's tool
+server settings narrows the exposed functions and survives a sync.
+
 ## [0.0.20-services.11] - 2026-08-24
 
 ### Fixed
