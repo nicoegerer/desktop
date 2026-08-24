@@ -192,6 +192,8 @@ const api = {
   workspaceListRepos: () => ipcRenderer.invoke('workspace:chip:repos'),
   workspaceOpenLocal: (request: { path: string }) =>
     ipcRenderer.invoke('workspace:chip:open', request?.path),
+  workspaceKeepAlive: (request: { ids: string[] }) =>
+    ipcRenderer.invoke('workspace:chip:keep-alive', request?.ids ?? []),
 
   syncOpenWebUI: () => ipcRenderer.invoke('open-webui:sync'),
 
