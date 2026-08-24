@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.8] - 2026-08-24
+
+### Added
+
+- **Cloud workspaces.** The workspace picker now distinguishes **Local** from **Cloud**. A cloud
+  workspace is a GitHub repository and branch that is never checked out: the model reads and writes
+  through the GitHub connector and commits straight to the selected branch. The choice is declared in
+  a delimited block of the user's system prompt, so a prompt written by hand is preserved and leaving
+  cloud mode removes the block again.
+
+### Changed
+
+- **Connectors are available without being switched on.** A registered connector still started every
+  conversation switched off, which is why a chat reported having no Garmin data and no file access
+  even though both connectors were running. Connectors are now written into the user's default tool
+  selection, so a new chat can call them from the first message.
+- **Workspace picker rebuilt around the two modes.** Local mode lists folders and opens one per
+  terminal; cloud mode lists repositories and then their branches. The status bar shows the active
+  workspace — `Local · desktop` or `Cloud · test1` — instead of a count of open workspaces.
+
+### Known limitation
+
+- Garmin MCP and GitHub MCP remain listed in the chat's tools menu and can still be switched off for
+  a single conversation. Open WebUI renders that menu from every registered tool server, and the only
+  way to remove an entry is to disable the connector, which would also stop the model from calling
+  it.
+
 ## [0.0.20-services.7] - 2026-08-24
 
 ### Changed

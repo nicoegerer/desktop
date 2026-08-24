@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  applyCloudWorkspacePrompt,
+  CLOUD_WORKSPACE_MARKER_START,
   DESKTOP_TOOL_PREFIX,
+  mergeDefaultTools,
   mergeTerminalServers,
   mergeToolServers,
   type TerminalServerConnection,
@@ -125,6 +128,95 @@ test('an unchanged registry produces a byte-identical list so no write happens',
   const second = mergeToolServers(first, targets)
 
   assert.equal(JSON.stringify(first), JSON.stringify(second))
+})
+
+// ─── Default tool selection ─────────────────────────────
+
+test('connectors default to on so a new chat can call them without toggling', () => {
+  const merged = mergeDefaultTools(
+    [],
+    [target({ id: 'garmin' }), target({ id: 'github-mcp', kind: 'mcp', path: '' })]
+  )
+
+  assert.deepEqual(merged, ['server:desktop-garmin', 'server:mcp:desktop-github-mcp'])
+})
+
+test('tools the user picked themselves are preserved', () => {
+  const merged = mergeDefaultTools(
+    ['my_python_tool', 'server:some-other-server'],
+    [target({ id: 'garmin' })]
+  )
+
+  assert.deepEqual(merged, ['my_python_tool', 'server:some-other-server', 'server:desktop-garmin'])
+})
+
+test('a disabled connector stops being a default tool', () => {
+  const merged = mergeDefaultTools(
+    ['server:desktop-garmin', 'my_python_tool'],
+    [target({ id: 'garmin', enabled: false })]
+  )
+
+  assert.deepEqual(merged, ['my_python_tool'])
+})
+
+test('a removed connector leaves no dangling tool id behind', () => {
+  const merged = mergeDefaultTools(['server:desktop-garmin', 'server:mcp:desktop-github-mcp'], [])
+
+  assert.deepEqual(merged, [])
+})
+
+test('an unchanged connector set produces an identical selection', () => {
+  const targets = [target({ id: 'garmin' }), target({ id: 'github-mcp', kind: 'mcp', path: '' })]
+  const first = mergeDefaultTools(['my_python_tool'], targets)
+  const second = mergeDefaultTools(first, targets)
+
+  assert.deepEqual(first, second)
+})
+
+// ─── Cloud workspace prompt ─────────────────────────────
+
+test('a cloud workspace is declared in the system prompt', () => {
+  const system = applyCloudWorkspacePrompt('', {
+    repoFullName: 'nicoegerer/test1',
+    branch: 'main'
+  })
+
+  assert.ok(system.includes('nicoegerer/test1'))
+  assert.ok(system.includes('`main`'))
+  // The model must not go looking for a checkout that was never made.
+  assert.ok(system.includes('no local checkout'))
+})
+
+test('the user’s own system prompt survives a workspace change', () => {
+  const mine = 'Antworte immer auf Deutsch.'
+  const first = applyCloudWorkspacePrompt(mine, {
+    repoFullName: 'nicoegerer/test1',
+    branch: 'main'
+  })
+  const second = applyCloudWorkspacePrompt(first, {
+    repoFullName: 'nicoegerer/desktop',
+    branch: 'managed-services'
+  })
+
+  assert.ok(second.startsWith(mine))
+  assert.ok(second.includes('nicoegerer/desktop'))
+  assert.ok(!second.includes('nicoegerer/test1'))
+  // Exactly one managed block, no matter how often the workspace changes.
+  assert.equal(second.split(CLOUD_WORKSPACE_MARKER_START).length - 1, 1)
+})
+
+test('leaving cloud mode removes the block and restores the prompt', () => {
+  const mine = 'Antworte immer auf Deutsch.'
+  const withWorkspace = applyCloudWorkspacePrompt(mine, {
+    repoFullName: 'nicoegerer/test1',
+    branch: 'main'
+  })
+
+  assert.equal(applyCloudWorkspacePrompt(withWorkspace, null), mine)
+})
+
+test('an empty prompt without a workspace stays empty', () => {
+  assert.equal(applyCloudWorkspacePrompt('', null), '')
 })
 
 // ─── Workspace terminals ────────────────────────────────

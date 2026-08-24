@@ -98,13 +98,17 @@ import {
 
 import {
   forgetWorkspace,
+  getCloudWorkspace,
   getWorkspacesRoot,
+  listGithubBranches,
   listGithubRepositories,
   listWorkspaces,
   prepareGithubWorkspace,
   rememberWorkspace,
+  setCloudWorkspace,
   setWorkspaceActive
 } from './utils/workspaces'
+import type { CloudWorkspace } from '../shared/services/tool-servers'
 
 import { initUpdater, checkForUpdates, downloadUpdate, installUpdate } from './updater'
 
@@ -185,6 +189,8 @@ let SERVER_STATUS: string | null = null
 let SERVER_REACHABLE = false
 let SERVER_PID: number | null = null
 let AUTH_TOKEN: string | null = null
+// Mirrors workspaces.cloud so the sync context can read it without awaiting.
+let CLOUD_WORKSPACE: CloudWorkspace | null = null
 let voiceInputRecording = false
 
 // ─── Global Shortcuts ───────────────────────────────────
@@ -1261,8 +1267,11 @@ if (!gotTheLock) {
           : null,
       resolveToken: () => AUTH_TOKEN,
       listToolTargets: () => getManagedServicesManager()?.getToolTargets() ?? [],
+      resolveCloudWorkspace: () => CLOUD_WORKSPACE,
       onResult: (result) => sendToRenderer('open-webui:sync', result)
     })
+
+    CLOUD_WORKSPACE = await getCloudWorkspace()
 
     void initializeManagedServices().then(() => {
       getManagedServicesManager()?.onChange(() => scheduleOpenWebUISync())
@@ -2249,6 +2258,36 @@ if (!gotTheLock) {
       }
       return listGithubRepositories(token)
     })
+
+    ipcMain.handle('workspace:github:branches', async (_event, fullName: string) => {
+      const token = getManagedServicesManager()?.getGithubAccessToken()
+      if (!token) {
+        throw new Error(
+          'No GitHub connector is configured. Add GitHub MCP under Settings → Services & Connectors first.'
+        )
+      }
+      return listGithubBranches(token, String(fullName ?? ''))
+    })
+
+    // ─── Cloud workspace ──────────────────────────────
+    // No checkout: the model works on the repository through the GitHub
+    // connector, so the choice only has to reach the system prompt.
+    ipcMain.handle('workspace:cloud:get', () => CLOUD_WORKSPACE)
+
+    ipcMain.handle(
+      'workspace:cloud:set',
+      async (_event, workspace: { repoFullName: string; branch: string } | null) => {
+        const next =
+          workspace && workspace.repoFullName && workspace.branch
+            ? { repoFullName: String(workspace.repoFullName), branch: String(workspace.branch) }
+            : null
+        await setCloudWorkspace(next)
+        CLOUD_WORKSPACE = next
+        const sync = await syncOpenWebUI()
+        if (sync.status === 'failed' || sync.status === 'skipped') scheduleOpenWebUISync()
+        return { workspace: next, sync }
+      }
+    )
 
     ipcMain.handle('workspace:github:prepare', async (_event, fullName: string) => {
       const token = getManagedServicesManager()?.getGithubAccessToken()

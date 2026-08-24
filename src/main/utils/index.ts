@@ -850,6 +850,8 @@ export interface AppConfig {
     recent: Array<{ path: string; name: string; repoFullName?: string; lastUsedAt: number }>
     /** Workspaces whose terminal is reopened on the next launch. */
     active: string[]
+    /** The GitHub repository worked on without a checkout, if any. */
+    cloud: { repoFullName: string; branch: string } | null
   }
   envVars: Record<string, string>
   showSidebar: boolean
@@ -891,7 +893,8 @@ const DEFAULT_CONFIG: AppConfig = {
   workspaces: {
     root: '',
     recent: [],
-    active: []
+    active: [],
+    cloud: null
   },
   envVars: {},
   showSidebar: false,

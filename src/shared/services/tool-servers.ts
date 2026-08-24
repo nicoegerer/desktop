@@ -29,6 +29,87 @@ export interface ToolServerConnection {
 export const toolServerInfoId = (serviceId: string): string =>
   `${DESKTOP_TOOL_PREFIX}${serviceId}`
 
+// ─── Default tool selection ─────────────────────────────
+//
+// Open WebUI selects tools per chat. Without a default, a connector is running
+// and registered but stays switched off in every new conversation, which reads
+// as "the model has no access". `settings.ui.tools` is the per-user default the
+// chat falls back to when a model carries no tool list of its own.
+
+/**
+ * The id Open WebUI uses for a registered connector. OpenAPI servers and native
+ * MCP servers are addressed differently — see `routers/tools.py`.
+ */
+export const connectorToolId = (target: Pick<ManagedServiceToolTarget, 'id' | 'kind'>): string => {
+  const infoId = toolServerInfoId(target.id)
+  return target.kind === 'mcp' ? `server:mcp:${infoId}` : `server:${infoId}`
+}
+
+const isDesktopToolId = (id: string): boolean =>
+  id.startsWith(`server:${DESKTOP_TOOL_PREFIX}`) || id.startsWith(`server:mcp:${DESKTOP_TOOL_PREFIX}`)
+
+/**
+ * Keep every tool the user chose and make the desktop's own connectors default
+ * to on. Connectors that are disabled or gone are dropped rather than left
+ * behind as ids that resolve to nothing.
+ */
+export const mergeDefaultTools = (
+  current: string[],
+  targets: ManagedServiceToolTarget[]
+): string[] => {
+  const wanted = targets.filter((target) => target.enabled).map(connectorToolId)
+  const kept = current.filter((id) => typeof id === 'string' && !isDesktopToolId(id))
+  const missing = wanted.filter((id) => !current.includes(id))
+
+  // Preserve the user's ordering; only genuinely new connectors are appended.
+  const preserved = current.filter((id) => isDesktopToolId(id) && wanted.includes(id))
+  return [...kept, ...preserved, ...missing].filter(
+    (id, index, all) => all.indexOf(id) === index
+  )
+}
+
+// ─── Cloud workspace prompt ─────────────────────────────
+
+export const CLOUD_WORKSPACE_MARKER_START = '<!-- open-webui-desktop:cloud-workspace -->'
+export const CLOUD_WORKSPACE_MARKER_END = '<!-- /open-webui-desktop:cloud-workspace -->'
+
+export interface CloudWorkspace {
+  repoFullName: string
+  branch: string
+}
+
+const cloudWorkspaceBlock = (workspace: CloudWorkspace): string =>
+  [
+    CLOUD_WORKSPACE_MARKER_START,
+    `The active workspace is the GitHub repository \`${workspace.repoFullName}\` on branch \`${workspace.branch}\`.`,
+    'Work in it through the GitHub tools: read files with the repository content tools and write',
+    'changes by committing to that branch. There is no local checkout of this repository, so do',
+    'not look for its files on disk and do not run git against it in a terminal.',
+    CLOUD_WORKSPACE_MARKER_END
+  ].join('\n')
+
+/**
+ * Declare the cloud workspace in the user's system prompt without disturbing
+ * anything they wrote themselves; the block is delimited so it can be replaced
+ * or removed on the next change.
+ */
+export const applyCloudWorkspacePrompt = (
+  system: string,
+  workspace: CloudWorkspace | null
+): string => {
+  const source = typeof system === 'string' ? system : ''
+  const start = source.indexOf(CLOUD_WORKSPACE_MARKER_START)
+  const endMarker = source.indexOf(CLOUD_WORKSPACE_MARKER_END)
+  const end = endMarker === -1 ? -1 : endMarker + CLOUD_WORKSPACE_MARKER_END.length
+
+  const before = start === -1 ? source : source.slice(0, start)
+  const after = start === -1 || end === -1 ? '' : source.slice(end)
+  const userText = start === -1 ? source : `${before.trimEnd()}\n${after.trimStart()}`.trim()
+
+  if (!workspace) return userText
+  return userText ? `${userText}\n\n${cloudWorkspaceBlock(workspace)}` : cloudWorkspaceBlock(workspace)
+}
+
 /** A workspace terminal as Open WebUI stores it under `terminal_server.connections`. */
 export interface TerminalServerConnection {
   id?: string
