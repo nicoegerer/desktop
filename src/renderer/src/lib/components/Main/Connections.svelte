@@ -12,11 +12,12 @@
   import WorkspacePicker from './Connections/WorkspacePicker.svelte'
   import type {
     ManagedServiceSnapshot,
-    ToolServerSyncResult
+    OpenWebUISyncResult,
+    WorkspaceTerminal
   } from '../../../../../shared/services/types'
 
   interface Props {
-    onOpenSettings: () => void
+    onOpenSettings: (tab?: string) => void
     sidebarOpen: boolean
     activeConnectionName?: string
   }
@@ -83,6 +84,7 @@
   let workspaceFeedbackTimer: ReturnType<typeof setTimeout> | null = null
   let workspacePickerOpen = $state(false)
   let workspaceStatus = $state('')
+  let workspaceTerminals = $state<WorkspaceTerminal[]>([])
 
   // Connector registration in Open WebUI
   const TOOL_SERVER_SYNC_DEBOUNCE_MS = 600
@@ -236,7 +238,7 @@
       activeConnectionId = id
       connectedUrl = openConnections.get(id)!
       view = 'connected'
-      syncOpenTerminalToWebview(id)
+      syncOpenWebUIRegistration()
       return
     }
 
@@ -262,7 +264,7 @@
           if (installPhase !== 'working') {
             view = 'connected'
           }
-          syncOpenTerminalToWebview(result.connectionId)
+          syncOpenWebUIRegistration()
         }
       })
     } else {
@@ -274,7 +276,7 @@
       openConnections = new Map(openConnections)
       connectedUrl = conn.url
       view = 'connected'
-      syncOpenTerminalToWebview(id)
+      syncOpenWebUIRegistration()
     }
   }
 
@@ -406,78 +408,49 @@
     }
   }
 
-  const syncOpenTerminalToWebview = (connId = 'local') => {
-    // A loopback Open Terminal belongs to the bundled local Open WebUI.
-    // Broadcasting it to remote servers would point their backend at itself.
-    if (connId !== 'local') return
-    if (!openTerminalInfo?.url || !openTerminalInfo?.apiKey || openTerminalStatus !== 'started') {
-      return
-    }
-    requestAnimationFrame(() => {
-      sendToWebview(
-        {
-          type: 'connections:terminal',
-          data: {
-            action: 'add',
-            url: openTerminalInfo?.url,
-            key: openTerminalInfo?.apiKey
-          }
-        },
-        connId
-      )
-    })
-  }
-
-  // ── Connector → Open WebUI tool servers ────────────────
-  // Starting a connector only launches the process; the chat still has to be
-  // told the endpoint exists. Push the registry into the bundled Open WebUI
-  // whenever it changes, the same way Open Terminal is registered.
-  const syncToolServersToWebview = (connId = 'local'): void => {
-    if (connId !== 'local') return
+  // Terminal and tool servers are registered by the main process against the
+  // bundled Open WebUI's admin API. Pushing them through the webview used to
+  // drop the registration whenever no webview existed yet — the normal case on
+  // startup — and Open WebUI's own helper stored terminals without an id, which
+  // the chat then hid.
+  const syncOpenWebUIRegistration = (): void => {
     if (toolServerSyncTimer) clearTimeout(toolServerSyncTimer)
-    toolServerSyncTimer = setTimeout(async () => {
-      try {
-        const targets = await window.electronAPI.getManagedServiceToolTargets()
-        sendToWebview({ type: 'connections:tools', data: { targets } }, 'local')
-      } catch (cause) {
-        console.error('Failed to collect connector tool targets:', cause)
-      }
+    toolServerSyncTimer = setTimeout(() => {
+      window.electronAPI
+        .syncOpenWebUI()
+        .then((result: OpenWebUISyncResult) => reportRegistration(result))
+        .catch((cause: unknown) => console.error('Open WebUI registration failed:', cause))
     }, TOOL_SERVER_SYNC_DEBOUNCE_MS)
   }
 
-  const handleWebviewEvent = (
-    connId: string,
-    payload: { type: string; data?: unknown }
-  ): void => {
-    if (connId !== 'local' || payload.type !== 'connections:tools:result') return
-    const result = (payload.data ?? {}) as ToolServerSyncResult
+  /** Surface only the outcomes the user can act on. */
+  const reportRegistration = (result?: OpenWebUISyncResult): void => {
+    if (!result) return
 
-    if (result.status === 'failed') {
-      showWorkspaceFeedback(
-        'error',
-        l(
-          `Konnektoren konnten nicht in Open WebUI registriert werden (${result.reason ?? 'unbekannt'}).`,
-          `Connectors could not be registered in Open WebUI (${result.reason ?? 'unknown'}).`
-        )
-      )
+    if (result.status === 'synced') {
+      // Open WebUI reads the tool and terminal lists once while the app layout
+      // mounts, so a freshly registered workspace stays invisible in the chat
+      // until the page reloads. Only an actual change triggers this.
+      sendToWebview({ type: 'page:reload' }, 'local')
       return
     }
+
     if (result.status === 'skipped' && result.reason === 'not-admin') {
       showWorkspaceFeedback(
         'error',
         l(
-          'Konnektoren brauchen ein Open-WebUI-Adminkonto, um als Werkzeugserver registriert zu werden.',
-          'Registering connectors as tool servers requires an Open WebUI admin account.'
+          'Konnektoren und Arbeitsbereiche brauchen ein Open-WebUI-Adminkonto, um im Chat auswählbar zu sein.',
+          'Connectors and workspaces need an Open WebUI admin account to be selectable in chat.'
         )
       )
       return
     }
-    if (result.status === 'synced') {
+    if (result.status === 'failed') {
       showWorkspaceFeedback(
-        'success',
+        'error',
         l(
-          `${result.count} Konnektor(en) in Open WebUI registriert. Im Chat über das Wolken-Symbol auswählen.`,
-          `${result.count} connector(s) registered in Open WebUI. Select them from the cloud icon in chat.`
+          `Registrierung in Open WebUI fehlgeschlagen (${result.reason ?? 'unbekannt'}).`,
+          `Registration in Open WebUI failed (${result.reason ?? 'unknown'}).`
         )
       )
     }
@@ -490,7 +463,7 @@
         activeManagedService = data.data as ManagedServiceSnapshot
       }
       if (data.type === 'managed-service:status' || data.type === 'managed-services:changed') {
-        syncToolServersToWebview()
+        syncOpenWebUIRegistration()
       }
       if (
         data.type === 'managed-services:changed' &&
@@ -518,8 +491,7 @@
           activeConnectionId = connId
           if (installPhase !== 'working') view = 'connected'
         }
-        syncOpenTerminalToWebview(connId)
-        syncToolServersToWebview(connId)
+        syncOpenWebUIRegistration()
         return
       }
 
@@ -569,12 +541,11 @@
         return
       }
 
-      if (data.type === 'connections:terminal') {
-        sendToWebview(data, 'local')
+      // ── Desktop-only state (not forwarded to webviews) ─
+      if (data.type === 'open-webui:sync') {
+        reportRegistration(data.data)
         return
       }
-
-      // ── Desktop-only state (not forwarded to webviews) ─
       if (data.type === 'status:open-terminal') {
         openTerminalStatus = data.data
         return
@@ -589,9 +560,10 @@
       }
       if (data.type === 'open-terminal:ready') {
         openTerminalInfo = data.data
-        openTerminalStatus = 'started'
+        openTerminalStatus = data.data?.status ?? null
         openTerminalSetupStatus = ''
-        syncOpenTerminalToWebview()
+        void refreshWorkspaceTerminals()
+        syncOpenWebUIRegistration()
         return
       }
       if (data.type === 'status:llamacpp') {
@@ -638,12 +610,13 @@
       if (info?.status) {
         openTerminalStatus = info.status
         openTerminalInfo = info
-        syncOpenTerminalToWebview()
+        syncOpenWebUIRegistration()
       }
     })
 
     // Register connectors that were autostarted before this view existed
-    syncToolServersToWebview()
+    syncOpenWebUIRegistration()
+    void refreshWorkspaceTerminals()
 
     // Check if Open Terminal package is installed
     window.electronAPI.getOpenTerminalStatus().then((installed: boolean) => {
@@ -689,58 +662,41 @@
    * Point Open Terminal at a folder and register it in the bundled Open WebUI,
    * so a chat can read, edit, and run commands inside it.
    */
-  const activateWorkspace = async (folder: string, repoFullName?: string): Promise<void> => {
+  const openWorkspace = async (folder: string, repoFullName?: string): Promise<void> => {
     if (!folder) return
 
     workspaceBusy = true
     workspaceFeedback = null
     try {
-      const currentConfig = await window.electronAPI.getConfig()
-      const currentInfo = await window.electronAPI.getOpenTerminalInfo()
-      const sameWorkspace =
-        comparableWorkspacePath(currentInfo?.workingDirectory ?? '') ===
-        comparableWorkspacePath(folder)
+      if (repoFullName) await window.electronAPI.rememberWorkspace(folder, repoFullName)
 
-      await window.electronAPI.setConfig({
-        openTerminal: {
-          ...(currentConfig?.openTerminal ?? {}),
-          cwd: folder,
-          enabled: true
-        }
-      })
-      config.set(await window.electronAPI.getConfig())
-
-      if (currentInfo?.status === 'started' && !sameWorkspace) {
-        openTerminalStatus = 'stopping'
-        const stopped = await window.electronAPI.stopOpenTerminal()
-        if (!stopped) throw new Error('Open Terminal could not be restarted for the new workspace.')
-        openTerminalInfo = null
-        openTerminalStatus = null
-      }
-
-      const result =
-        currentInfo?.status === 'started' && sameWorkspace
-          ? currentInfo
-          : await window.electronAPI.startOpenTerminal()
-      if (!result?.url || !result?.workingDirectory) {
+      const { terminal, sync } = await window.electronAPI.openWorkspace(folder)
+      if (!terminal?.url) {
         throw new Error('Open Terminal could not be started for the selected workspace.')
       }
 
-      openTerminalInfo = result
+      openTerminalInfo = terminal
       openTerminalStatus = 'started'
       openTerminalInstalled = true
-      const synced = await window.electronAPI.syncOpenTerminal()
-      if (!synced) throw new Error('The workspace could not be registered in Open WebUI.')
+      await refreshWorkspaceTerminals()
 
-      await window.electronAPI.rememberWorkspace(result.workingDirectory, repoFullName)
-      workspacePickerOpen = false
-      workspaceStatus = ''
+      if (sync?.status === 'failed' || sync?.status === 'skipped') {
+        reportRegistration(sync)
+        showWorkspaceFeedback(
+          'error',
+          l(
+            `„${terminal.cwd}“ läuft, ist aber noch nicht in Open WebUI registriert. Die Registrierung wird wiederholt.`,
+            `“${terminal.cwd}” is running but not registered in Open WebUI yet; registration will be retried.`
+          )
+        )
+        return
+      }
 
       showWorkspaceFeedback(
         'success',
         l(
-          `Arbeitsbereich bereit: ${result.workingDirectory}. Im Chat über das Wolken-Symbol „Local Open Terminal“ auswählen.`,
-          `Workspace ready: ${result.workingDirectory}. In the chat, click the cloud icon and select “Local Open Terminal”.`
+          `Arbeitsbereich „${terminal.cwd}“ bereit. Im Chat über das Wolken-Symbol auswählen.`,
+          `Workspace “${terminal.cwd}” is ready. Select it from the cloud icon in chat.`
         )
       )
     } catch (cause) {
@@ -749,6 +705,24 @@
       workspaceBusy = false
       workspaceStatus = ''
     }
+  }
+
+  const closeWorkspace = async (folder: string): Promise<void> => {
+    workspaceBusy = true
+    try {
+      await window.electronAPI.closeWorkspace(folder)
+      await refreshWorkspaceTerminals()
+      openTerminalInfo = await window.electronAPI.getOpenTerminalInfo()
+      if (!workspaceTerminals.length) openTerminalStatus = null
+    } catch (cause) {
+      showWorkspaceFeedback('error', cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      workspaceBusy = false
+    }
+  }
+
+  const refreshWorkspaceTerminals = async (): Promise<void> => {
+    workspaceTerminals = await window.electronAPI.listWorkspaceTerminals()
   }
 
   const chooseWorkspace = (): void => {
@@ -852,7 +826,6 @@
       onSetView={(v) => {
         view = v
       }}
-      onWebviewEvent={handleWebviewEvent}
     />
   </div>
 
@@ -907,11 +880,16 @@
 
   {#if workspacePickerOpen}
     <WorkspacePicker
-      activePath={openTerminalInfo?.workingDirectory ?? $config?.openTerminal?.cwd ?? ''}
+      terminals={workspaceTerminals}
       busy={workspaceBusy}
       statusText={workspaceStatus}
       onClose={() => (workspacePickerOpen = false)}
-      onActivate={activateWorkspace}
+      onOpen={openWorkspace}
+      onCloseWorkspace={closeWorkspace}
+      onConnectGithub={() => {
+        workspacePickerOpen = false
+        onOpenSettings('services')
+      }}
     />
   {/if}
 
@@ -937,7 +915,8 @@
     llamaCppInstalled={!!llamaCppInfo?.binaryPath}
     {activeLog}
     activeManagedServiceId={activeManagedService?.id ?? null}
-    workspacePath={openTerminalInfo?.workingDirectory ?? $config?.openTerminal?.cwd ?? ''}
+    workspacePath={openTerminalInfo?.workingDirectory ?? ''}
+    workspaceCount={workspaceTerminals.filter((terminal) => terminal.status === 'started').length}
     {workspaceBusy}
     onSelectLog={selectLog}
     onSelectManagedService={selectManagedService}

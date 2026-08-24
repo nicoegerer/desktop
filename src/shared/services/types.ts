@@ -64,10 +64,24 @@ export interface ManagedServiceToolTarget {
   ready: boolean
 }
 
-export interface ToolServerSyncResult {
+/** Outcome of writing connectors and workspaces into Open WebUI's config. */
+export interface OpenWebUISyncResult {
   status: 'synced' | 'unchanged' | 'skipped' | 'failed'
   reason?: string
-  count: number
+  toolServers: number
+  terminals: number
+}
+
+/** A workspace folder with its own Open Terminal instance. */
+export interface WorkspaceTerminal {
+  id: string
+  cwd: string
+  workingDirectory: string
+  port: number
+  url: string | null
+  apiKey: string | null
+  pid: number | null
+  status: string | null
 }
 
 export interface ManagedServiceImportPreview {

@@ -56,7 +56,12 @@ import {
   getOpenTerminalInfo,
   getOpenTerminalPty,
   getOpenTerminalLog,
-  validateOpenTerminalProcess
+  validateOpenTerminalProcess,
+  listWorkspaceTerminals,
+  startWorkspaceTerminal,
+  stopWorkspaceTerminal,
+  stopAllWorkspaceTerminals,
+  setActiveWorkspaceTerminal
 } from './utils/open-terminal'
 
 import {
@@ -85,12 +90,20 @@ import {
 import { initializeManagedServices, getManagedServicesManager } from './services'
 
 import {
+  cancelOpenWebUISync,
+  configureOpenWebUISync,
+  scheduleOpenWebUISync,
+  syncOpenWebUI
+} from './services/open-webui-sync'
+
+import {
   forgetWorkspace,
   getWorkspacesRoot,
   listGithubRepositories,
   listWorkspaces,
   prepareGithubWorkspace,
-  rememberWorkspace
+  rememberWorkspace,
+  setWorkspaceActive
 } from './utils/workspaces'
 
 import { initUpdater, checkForUpdates, downloadUpdate, installUpdate } from './updater'
@@ -986,6 +999,9 @@ const startServerHandler = async (): Promise<boolean> => {
     connectPtyPort(pid)
     updateTray()
 
+    // Connectors and workspaces can only be registered once the server answers.
+    scheduleOpenWebUISync()
+
     checkUrlAndOpen(SERVER_URL, async () => {
       SERVER_REACHABLE = true
       sendToRenderer('server:ready', { url: SERVER_URL })
@@ -1235,7 +1251,23 @@ if (!gotTheLock) {
     }
     electronApp.setAppUserModelId('com.openwebui.desktop')
 
-    void initializeManagedServices()
+    // The desktop registry owns part of Open WebUI's configuration. Registering
+    // it from the main process keeps it independent of whether a webview
+    // happens to exist yet.
+    configureOpenWebUISync({
+      resolveBaseUrl: () =>
+        SERVER_STATUS === 'started' && SERVER_URL
+          ? SERVER_URL.replace('http://0.0.0.0', 'http://localhost')
+          : null,
+      resolveToken: () => AUTH_TOKEN,
+      listToolTargets: () => getManagedServicesManager()?.getToolTargets() ?? [],
+      onResult: (result) => sendToRenderer('open-webui:sync', result)
+    })
+
+    void initializeManagedServices().then(() => {
+      getManagedServicesManager()?.onChange(() => scheduleOpenWebUISync())
+      scheduleOpenWebUISync()
+    })
 
     // ─── GPU Process Crash Recovery ──────────────────
     // If the GPU process exits fatally (e.g. sandbox init failure on
@@ -1647,8 +1679,11 @@ if (!gotTheLock) {
 
     // Auth token relay from webview
     ipcMain.handle('app:setAuthToken', (_event, token: string) => {
+      const isNew = AUTH_TOKEN !== (token || null)
       AUTH_TOKEN = token || null
       log.info('Auth token updated from webview')
+      // A fresh sign-in is usually what unblocks a deferred registration.
+      if (isNew && AUTH_TOKEN) scheduleOpenWebUISync()
     })
 
     // Misc
@@ -1926,20 +1961,19 @@ if (!gotTheLock) {
     })
 
     // Open Terminal
+    //
+    // Terminal servers are registered from the main process, not by pushing an
+    // event into the webview: Open WebUI's own helper stores them without an id,
+    // and the chat hides id-less system terminals.
     ipcMain.handle('open-terminal:start', async () => {
       try {
         sendToRenderer('status:open-terminal', 'starting')
-        const result = await startOpenTerminal(CONFIG?.openTerminal?.port ?? null, (status) => {
+        const result = await startOpenTerminal((status) => {
           sendToRenderer('status:open-terminal-setup', status)
         })
         sendToRenderer('status:open-terminal', 'started')
         sendToRenderer('open-terminal:ready', result)
-        // Notify webview to register terminal server at system level
-        sendToRenderer('connections:terminal', {
-          action: 'add',
-          url: result.url,
-          key: result.apiKey
-        })
+        scheduleOpenWebUISync()
         return result
       } catch (error) {
         log.error('Failed to start Open Terminal:', error)
@@ -1951,17 +1985,9 @@ if (!gotTheLock) {
 
     ipcMain.handle('open-terminal:stop', async () => {
       try {
-        const info = getOpenTerminalInfo()
         await stopOpenTerminal()
         sendToRenderer('status:open-terminal', 'stopped')
-        // Notify webview to unregister terminal server
-        if (info.url) {
-          sendToRenderer('connections:terminal', {
-            action: 'remove',
-            url: info.url
-          })
-        }
-
+        scheduleOpenWebUISync()
         return true
       } catch (error) {
         log.error('Failed to stop Open Terminal:', error)
@@ -1970,24 +1996,58 @@ if (!gotTheLock) {
     })
 
     ipcMain.handle('open-terminal:sync', async () => {
-      const info = getOpenTerminalInfo()
-      if (info.status !== 'started' || !info.url || !info.apiKey) return false
-
-      // Open WebUI currently ignores a duplicate URL instead of updating its key.
-      // Explicit sync therefore removes the stale entry before adding the live one again.
-      sendToRenderer('connections:terminal', { action: 'remove', url: info.url })
-      await new Promise((resolve) => setTimeout(resolve, 400))
-      sendToRenderer('connections:terminal', {
-        action: 'add',
-        url: info.url,
-        key: info.apiKey
-      })
-      return true
+      const result = await syncOpenWebUI()
+      return result.status === 'synced' || result.status === 'unchanged'
     })
 
     ipcMain.handle('open-terminal:info', () => getOpenTerminalInfo())
     ipcMain.handle('open-terminal:status', () => isPackageInstalled('open-terminal'))
     ipcMain.handle('open-terminal:pty:connect', () => connectOpenTerminalPtyPort())
+
+    // ─── Workspace terminals ──────────────────────────
+    // One Open Terminal per workspace, so a chat can pick its working folder.
+    ipcMain.handle('workspace:terminals', () => listWorkspaceTerminals())
+
+    ipcMain.handle('workspace:open', async (_event, workspacePath: string) => {
+      if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
+        throw new Error('A workspace folder is required')
+      }
+      sendToRenderer('status:workspace', `Starting Open Terminal in ${workspacePath}…`)
+      const terminal = await startWorkspaceTerminal(workspacePath, (status) =>
+        sendToRenderer('status:workspace', status)
+      )
+      await rememberWorkspace(workspacePath)
+      await setWorkspaceActive(workspacePath, true)
+      sendToRenderer('status:open-terminal', 'started')
+      sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
+      sendToRenderer('status:workspace', '')
+
+      // Registering is what makes the workspace selectable in a chat, so the
+      // caller is told whether that actually succeeded.
+      const result = await syncOpenWebUI()
+      if (result.status === 'failed' || result.status === 'skipped') {
+        scheduleOpenWebUISync()
+      }
+      return { terminal, sync: result }
+    })
+
+    ipcMain.handle('workspace:close', async (_event, workspacePath: string) => {
+      if (typeof workspacePath !== 'string') throw new Error('A workspace folder is required')
+      const stopped = await stopWorkspaceTerminal(workspacePath)
+      await setWorkspaceActive(workspacePath, false)
+      sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
+      if (!listWorkspaceTerminals().length) sendToRenderer('status:open-terminal', 'stopped')
+      await syncOpenWebUI()
+      return stopped
+    })
+
+    ipcMain.handle('workspace:activate', (_event, workspacePath: string) => {
+      const changed = setActiveWorkspaceTerminal(String(workspacePath ?? ''))
+      if (changed) sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
+      return changed
+    })
+
+    ipcMain.handle('open-webui:sync', () => syncOpenWebUI())
 
     // llama.cpp
     ipcMain.handle('llamacpp:setup', async () => {
@@ -2283,25 +2343,29 @@ if (!gotTheLock) {
     validateOpenTerminalProcess()
     validateLlamaCppProcess()
 
-    // Auto-start Open Terminal if previously enabled
-    if (CONFIG?.openTerminal?.enabled) {
+    // Reopen the workspaces that were active in the previous session, so their
+    // terminals are selectable in a chat without touching the picker first.
+    const restorableWorkspaces = (CONFIG?.workspaces?.active ?? []).filter(
+      (entry): entry is string => typeof entry === 'string' && !!entry.trim()
+    )
+    if (CONFIG?.openTerminal?.enabled && !restorableWorkspaces.length && CONFIG?.openTerminal?.cwd) {
+      restorableWorkspaces.push(CONFIG.openTerminal.cwd)
+    }
+
+    for (const workspacePath of restorableWorkspaces) {
       try {
         sendToRenderer('status:open-terminal', 'starting')
-        const result = await startOpenTerminal(CONFIG?.openTerminal?.port ?? null, (status) => {
+        await startWorkspaceTerminal(workspacePath, (status) => {
           sendToRenderer('status:open-terminal-setup', status)
         })
         sendToRenderer('status:open-terminal', 'started')
-        sendToRenderer('open-terminal:ready', result)
-        sendToRenderer('connections:terminal', {
-          action: 'add',
-          url: result.url,
-          key: result.apiKey
-        })
+        sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
       } catch (error) {
-        log.error('Auto-start Open Terminal failed:', error)
+        log.error(`Auto-start Open Terminal failed for ${workspacePath}:`, error)
         sendToRenderer('status:open-terminal', 'failed')
       }
     }
+    if (restorableWorkspaces.length) scheduleOpenWebUISync()
 
     // Auto-start llama.cpp if previously enabled
     if (CONFIG?.llamaCpp?.enabled) {
@@ -2361,8 +2425,9 @@ if (!gotTheLock) {
 
   app.on('before-quit', async () => {
     isQuiting = true
+    cancelOpenWebUISync()
     await stopLlamaCpp()
-    await stopOpenTerminal()
+    await stopAllWorkspaceTerminals()
     await stopServerHandler()
     globalShortcut.unregisterAll()
     mainWindow = null

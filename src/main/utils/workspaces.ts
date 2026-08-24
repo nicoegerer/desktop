@@ -89,6 +89,28 @@ export const rememberWorkspace = async (
   return recent
 }
 
+// ─── Active workspaces ──────────────────────────────────
+//
+// Which workspaces have a running terminal. Persisted so a restart restores the
+// same set instead of silently dropping every chat's working folder.
+
+const readActive = (config: AppConfig): string[] =>
+  Array.isArray(config.workspaces?.active) ? config.workspaces.active : []
+
+export const setWorkspaceActive = async (
+  workspacePath: string,
+  active: boolean
+): Promise<string[]> => {
+  const config = await getConfig()
+  const key = comparablePath(workspacePath)
+  const remaining = readActive(config).filter((entry) => comparablePath(entry) !== key)
+  const next = active ? [...remaining, path.normalize(workspacePath)] : remaining
+  await setConfig({
+    workspaces: { ...(config.workspaces ?? {}), active: next }
+  } as Partial<AppConfig>)
+  return next
+}
+
 export const forgetWorkspace = async (workspacePath: string): Promise<WorkspaceEntry[]> => {
   const config = await getConfig()
   const key = comparablePath(workspacePath)

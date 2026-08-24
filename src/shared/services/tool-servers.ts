@@ -29,6 +29,94 @@ export interface ToolServerConnection {
 export const toolServerInfoId = (serviceId: string): string =>
   `${DESKTOP_TOOL_PREFIX}${serviceId}`
 
+/** A workspace terminal as Open WebUI stores it under `terminal_server.connections`. */
+export interface TerminalServerConnection {
+  id?: string
+  name?: string
+  enabled?: boolean
+  url?: string
+  path?: string
+  key?: string
+  auth_type?: string
+  config?: Record<string, unknown> | null
+  [key: string]: unknown
+}
+
+export interface WorkspaceTerminalTarget {
+  id: string
+  cwd: string
+  url: string | null
+  apiKey: string | null
+}
+
+const terminalEntry = (
+  terminal: WorkspaceTerminalTarget,
+  existing: TerminalServerConnection | null,
+  name: string
+): TerminalServerConnection => ({
+  ...(existing ?? {}),
+  id: terminal.id,
+  name,
+  enabled: true,
+  url: terminal.url ?? '',
+  path: '/openapi.json',
+  key: terminal.apiKey ?? '',
+  auth_type: 'bearer',
+  config: existing?.config ?? null
+})
+
+export const workspaceDisplayName = (cwd: string): string =>
+  cwd
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/]/)
+    .pop() || cwd
+
+/**
+ * Replace desktop-owned terminals and keep everything else.
+ *
+ * Entries without an id that point at a loopback address are dropped: earlier
+ * versions registered the workspace that way, and Open WebUI hides id-less
+ * system terminals from the chat, so they are invisible clutter that can be
+ * neither selected nor removed from the desktop app.
+ */
+export const mergeTerminalServers = (
+  current: TerminalServerConnection[],
+  terminals: WorkspaceTerminalTarget[]
+): TerminalServerConnection[] => {
+  const managed = new Map(terminals.map((terminal) => [terminal.id, terminal]))
+  const merged: TerminalServerConnection[] = []
+  const applied = new Set<string>()
+
+  for (const entry of current) {
+    const id = typeof entry?.id === 'string' ? entry.id : ''
+
+    if (!id) {
+      const url = typeof entry?.url === 'string' ? entry.url : ''
+      if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(url)) continue
+      merged.push(entry)
+      continue
+    }
+
+    if (!id.startsWith(DESKTOP_TOOL_PREFIX)) {
+      merged.push(entry)
+      continue
+    }
+
+    const terminal = managed.get(id)
+    if (!terminal) continue // workspace was closed in the desktop app
+    merged.push(terminalEntry(terminal, entry, workspaceDisplayName(terminal.cwd)))
+    applied.add(id)
+  }
+
+  for (const [id, terminal] of managed) {
+    if (!applied.has(id)) {
+      merged.push(terminalEntry(terminal, null, workspaceDisplayName(terminal.cwd)))
+    }
+  }
+
+  return merged
+}
+
 /**
  * Build the Open WebUI entry for a connector. Mirrors the payload that
  * `AddToolServerModal` writes, so a synced entry is indistinguishable from a

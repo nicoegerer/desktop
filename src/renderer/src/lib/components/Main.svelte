@@ -9,6 +9,7 @@
 
   let visible = $state(false)
   let settingsOpen = $state(false)
+  let settingsTab = $state('general')
   let sidebarOpen = $state(true)
   let activeConnectionName = $state('')
 
@@ -115,7 +116,10 @@
       <Connections
         {sidebarOpen}
         bind:activeConnectionName
-        onOpenSettings={() => (settingsOpen = true)}
+        onOpenSettings={(tab = 'general') => {
+          settingsTab = tab
+          settingsOpen = true
+        }}
       />
     </div>
 
@@ -134,7 +138,7 @@
           in:fade={{ duration: 150 }}
           onclick={(e) => e.stopPropagation()}
         >
-          <Settings onClose={() => (settingsOpen = false)} />
+          <Settings initialTab={settingsTab} onClose={() => (settingsOpen = false)} />
         </div>
       </div>
     {/if}

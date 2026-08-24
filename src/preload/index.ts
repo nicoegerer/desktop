@@ -191,6 +191,12 @@ const api = {
   listGithubRepositories: () => ipcRenderer.invoke('workspace:github:repos'),
   prepareGithubWorkspace: (fullName: string) =>
     ipcRenderer.invoke('workspace:github:prepare', fullName),
+  listWorkspaceTerminals: () => ipcRenderer.invoke('workspace:terminals'),
+  openWorkspace: (workspacePath: string) => ipcRenderer.invoke('workspace:open', workspacePath),
+  closeWorkspace: (workspacePath: string) => ipcRenderer.invoke('workspace:close', workspacePath),
+  activateWorkspace: (workspacePath: string) =>
+    ipcRenderer.invoke('workspace:activate', workspacePath),
+  syncOpenWebUI: () => ipcRenderer.invoke('open-webui:sync'),
 
   // Updater
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),

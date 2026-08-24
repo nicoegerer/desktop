@@ -22,61 +22,52 @@ WebUI, Open Terminal, and llama.cpp. Right-click a running local service to stop
 ## Chat access to a connector
 
 Starting a connector only launches the process. The bundled Open WebUI also has to know the
-endpoint, so the desktop registry writes every MCP and remote connector into Open WebUI's
-`TOOL_SERVER_CONNECTIONS` whenever the registry changes and whenever a connection opens. mcpo
-connectors are registered as **OpenAPI** servers pointing at `openapi.json`; remote endpoints are
-registered as **MCP (Streamable HTTP)** servers with their bearer token.
+endpoint, so the main process writes every MCP and remote connector into Open WebUI's
+`TOOL_SERVER_CONNECTIONS` through its admin API. mcpo connectors are registered as **OpenAPI**
+servers pointing at `openapi.json`; remote endpoints are registered as **MCP (Streamable HTTP)**
+servers with their bearer token.
 
-Registered entries carry the id `desktop-<service-id>`. Connections added by hand in Open WebUI are
-never touched, and a connector removed from the desktop registry is removed from Open WebUI on the
-next sync. Disabling a connector clears its `enable` flag instead of deleting the entry, so bearer
-keys and filters survive a restart.
+Registration is retried with backoff while the server is still booting or nobody is signed in yet,
+and it repeats whenever the registry changes. Registered entries carry the id `desktop-<service-id>`.
+Connections added by hand in Open WebUI are never touched, and a connector removed from the desktop
+registry is removed from Open WebUI on the next sync. Disabling a connector clears its `enable` flag
+instead of deleting the entry, so bearer keys and filters survive a restart.
 
-Two conditions apply:
-
-- The Open WebUI account must be an **admin**; tool-server configuration is an admin API. A
-  non-admin session is reported in the desktop status toast and nothing is written.
-- The sync waits for sign-in. If the app opens on the login screen, registration happens as soon as
-  a session token exists.
+The Open WebUI account must be an **admin**; tool-server configuration is an admin API. A non-admin
+session is reported in the desktop status toast and nothing is written.
 
 Open WebUI still requires the tools to be picked per chat. Click the cloud icon in the message box
 and select the connector.
 
 ## Work on local projects
 
-The **Workspace** button in the bottom chat status bar is the shortest path from chat to an actual
-project. It stays outside the Services & Connectors settings because it controls the current local
-chat workspace rather than adding another connector:
+Open WebUI picks a terminal server per conversation, so the desktop app runs **one Open Terminal per
+workspace**. A chat therefore chooses which folder it works in, instead of every chat sharing one
+global working directory.
 
-1. Click **Choose workspace**. The picker has two tabs:
-   - **Local** — recently used workspaces plus a folder browser. Nothing is selected on a fresh
-     installation, and the active path remains visible after selection.
+The **Workspaces** button in the bottom chat status bar manages that set:
+
+1. Click it to open the workspace manager. It has two tabs:
+   - **Local** — recently used workspaces plus a folder browser. Clicking a workspace opens it
+     (starts its terminal) or closes it again.
    - **GitHub** — repositories reachable with the token of the configured GitHub MCP connector. No
-     second credential is requested. Selecting a repository clones it into the clone folder shown at
-     the bottom of the picker, or fast-forwards an existing clone. A checkout with uncommitted
-     changes is opened as-is instead of being pulled.
-2. The desktop app starts or restarts Open Terminal in that exact folder and registers it only in
-   the bundled local Open WebUI instance.
-3. In an Open WebUI chat, click the cloud icon and select **Local Open Terminal**. A tool-capable
-   model can then create and edit files, run commands, use Git, install project dependencies, and
-   execute builds and tests.
+     second credential is requested; if none is configured, **Connect GitHub** jumps straight to the
+     connector setup. Opening a repository clones it into the clone folder shown at the bottom of the
+     picker, or fast-forwards an existing clone. A checkout with uncommitted changes is opened as-is
+     instead of being pulled.
+2. Every open workspace is registered in the bundled Open WebUI as a terminal server named after its
+   folder, with a stable id of `desktop-ws-<hash>`.
+3. In an Open WebUI chat, click the cloud icon and select the workspace. A tool-capable model can
+   then create and edit files, run commands, use Git, install project dependencies, and execute
+   builds and tests in that folder.
+
+Open WebUI reads its terminal list while the page loads, so the desktop app reloads the embedded page
+after a registration actually changed something. Open workspaces are remembered and reopened on the
+next launch.
 
 The clone folder defaults to `~/OpenWebUI Workspaces` and can be overridden with `workspaces.root`
 in the desktop config. Cloning requires `git` on `PATH`; the token is passed through the environment
 so it never appears in process arguments.
-
-If a response mentions only `/mnt/uploads`, the chat used Open WebUI's isolated code interpreter
-instead of Local Open Terminal. Select **Local Open Terminal** from the cloud menu for host-folder
-access. Open WebUI currently requires this tool selection per chat.
-
-OmniRoute supplies models; it does not forward the local tools of a separate Codex or Claude Code
-process. Open WebUI needs its own Open Terminal connection for agentic workspace access.
-
-Open Terminal runs directly with the desktop user's permissions. The selected folder is the initial
-working directory and file-browser root, not a security sandbox. Use a trusted model, keep backups,
-and prefer an isolated Docker deployment when host-wide access is not required. The desktop API key
-is removed from process arguments and logs and is encrypted with Electron `safeStorage` when the
-operating system supports it.
 
 ## GitHub MCP preset
 
