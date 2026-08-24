@@ -2,8 +2,11 @@ import { net as electronNet, webContents } from 'electron'
 import log from 'electron-log'
 
 import {
+  applyCloudWorkspacePrompt,
+  mergeDefaultTools,
   mergeTerminalServers,
   mergeToolServers,
+  type CloudWorkspace,
   type TerminalServerConnection,
   type ToolServerConnection
 } from '../../shared/services/tool-servers'
@@ -32,6 +35,8 @@ interface SyncContext {
   /** Admin token relayed from the Open WebUI page, if one was seen. */
   resolveToken: () => string | null
   listToolTargets: () => ManagedServiceToolTarget[]
+  /** The selected cloud repository, or null when no cloud workspace is active. */
+  resolveCloudWorkspace: () => CloudWorkspace | null
   onResult?: (result: OpenWebUISyncResult) => void
 }
 
@@ -97,6 +102,60 @@ const writeConfig = async (
   })
   if (!response.ok) log.warn(`Open WebUI sync — ${path} write returned ${response.status}`)
   return response.ok
+}
+
+/**
+ * Make the desktop's connectors the default tool selection and declare the
+ * cloud workspace, both of which live in the signed-in user's settings.
+ *
+ * Open WebUI replaces the whole settings object on write, so the current one is
+ * read and merged rather than patched.
+ */
+const syncUserSettings = async (
+  baseUrl: string,
+  token: string,
+  targets: ManagedServiceToolTarget[],
+  cloudWorkspace: CloudWorkspace | null
+): Promise<boolean | 'failed'> => {
+  const response = await electronNet.fetch(`${baseUrl}/api/v1/users/user/settings`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(15_000)
+  })
+  if (!response.ok) {
+    log.warn(`Open WebUI sync — reading user settings returned ${response.status}`)
+    return 'failed'
+  }
+
+  const settings = ((await response.json()) as Record<string, unknown> | null) ?? {}
+  const ui = (settings.ui ?? {}) as Record<string, unknown>
+
+  const currentTools = Array.isArray(ui.tools) ? (ui.tools as string[]) : []
+  const nextTools = mergeDefaultTools(currentTools, targets)
+  const currentSystem = typeof ui.system === 'string' ? ui.system : ''
+  const nextSystem = applyCloudWorkspacePrompt(currentSystem, cloudWorkspace)
+
+  if (
+    JSON.stringify(currentTools) === JSON.stringify(nextTools) &&
+    currentSystem === nextSystem
+  ) {
+    return false
+  }
+
+  const body = {
+    ...settings,
+    ui: { ...ui, tools: nextTools, system: nextSystem || undefined }
+  }
+  const write = await electronNet.fetch(`${baseUrl}/api/v1/users/user/settings/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000)
+  })
+  if (!write.ok) {
+    log.warn(`Open WebUI sync — writing user settings returned ${write.status}`)
+    return 'failed'
+  }
+  return true
 }
 
 export const syncOpenWebUI = async (): Promise<OpenWebUISyncResult> => {
@@ -167,6 +226,19 @@ export const syncOpenWebUI = async (): Promise<OpenWebUISyncResult> => {
       return { status: 'failed', reason: 'terminals-write', toolServers: 0, terminals: 0 }
     wrote = true
   }
+
+  // Registering a connector is only half the job: Open WebUI still has to
+  // select it for a conversation, which is what the user default does.
+  const settingsWritten = await syncUserSettings(
+    baseUrl,
+    token,
+    toolTargets,
+    context.resolveCloudWorkspace()
+  )
+  if (settingsWritten === 'failed') {
+    return { status: 'failed', reason: 'user-settings-write', toolServers: 0, terminals: 0 }
+  }
+  wrote = wrote || settingsWritten
 
   return {
     status: wrote ? 'synced' : 'unchanged',

@@ -15,6 +15,7 @@
     OpenWebUISyncResult,
     WorkspaceTerminal
   } from '../../../../../shared/services/types'
+  import type { CloudWorkspace } from '../../../../../shared/services/tool-servers'
 
   interface Props {
     onOpenSettings: (tab?: string) => void
@@ -85,6 +86,7 @@
   let workspacePickerOpen = $state(false)
   let workspaceStatus = $state('')
   let workspaceTerminals = $state<WorkspaceTerminal[]>([])
+  let cloudWorkspace = $state<CloudWorkspace | null>(null)
 
   // Connector registration in Open WebUI
   const TOOL_SERVER_SYNC_DEBOUNCE_MS = 600
@@ -723,7 +725,50 @@
 
   const refreshWorkspaceTerminals = async (): Promise<void> => {
     workspaceTerminals = await window.electronAPI.listWorkspaceTerminals()
+    cloudWorkspace = await window.electronAPI.getCloudWorkspace()
   }
+
+  /**
+   * A cloud workspace has no terminal — the model edits the repository through
+   * the GitHub connector, so selecting one only has to reach the system prompt.
+   */
+  const selectCloudWorkspace = async (workspace: CloudWorkspace | null): Promise<void> => {
+    workspaceBusy = true
+    try {
+      const { workspace: applied, sync } = await window.electronAPI.setCloudWorkspace(workspace)
+      cloudWorkspace = applied
+      reportRegistration(sync)
+      if (sync?.status !== 'failed') {
+        showWorkspaceFeedback(
+          'success',
+          applied
+            ? l(
+                `Cloud-Arbeitsbereich: ${applied.repoFullName} (${applied.branch}). Das Modell arbeitet ohne lokalen Klon über GitHub.`,
+                `Cloud workspace: ${applied.repoFullName} (${applied.branch}). The model works through GitHub without a local clone.`
+              )
+            : l('Cloud-Arbeitsbereich beendet.', 'Cloud workspace left.')
+        )
+      }
+    } catch (cause) {
+      showWorkspaceFeedback('error', cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      workspaceBusy = false
+    }
+  }
+
+  /** What the status bar shows: the active way of working, not a count. */
+  const workspaceStatusLabel = $derived(
+    cloudWorkspace
+      ? `${l('Cloud', 'Cloud')} · ${cloudWorkspace.repoFullName.split('/').pop()}`
+      : (() => {
+          const open = workspaceTerminals.filter((terminal) => terminal.status === 'started')
+          if (open.length === 0) return ''
+          if (open.length === 1) {
+            return `${l('Lokal', 'Local')} · ${open[0].cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}`
+          }
+          return `${l('Lokal', 'Local')} · ${open.length}`
+        })()
+  )
 
   const chooseWorkspace = (): void => {
     workspaceFeedback = null
@@ -884,8 +929,10 @@
       busy={workspaceBusy}
       statusText={workspaceStatus}
       onClose={() => (workspacePickerOpen = false)}
+      {cloudWorkspace}
       onOpen={openWorkspace}
       onCloseWorkspace={closeWorkspace}
+      onSelectCloud={selectCloudWorkspace}
       onConnectGithub={() => {
         workspacePickerOpen = false
         onOpenSettings('services')
@@ -915,8 +962,7 @@
     llamaCppInstalled={!!llamaCppInfo?.binaryPath}
     {activeLog}
     activeManagedServiceId={activeManagedService?.id ?? null}
-    workspacePath={openTerminalInfo?.workingDirectory ?? ''}
-    workspaceCount={workspaceTerminals.filter((terminal) => terminal.status === 'started').length}
+    workspaceLabel={workspaceStatusLabel}
     {workspaceBusy}
     onSelectLog={selectLog}
     onSelectManagedService={selectManagedService}

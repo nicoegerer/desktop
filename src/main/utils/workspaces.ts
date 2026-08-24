@@ -7,6 +7,7 @@ import { net as electronNet } from 'electron'
 import log from 'electron-log'
 
 import { getConfig, setConfig, type AppConfig } from './index'
+import type { CloudWorkspace } from '../../shared/services/tool-servers'
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -119,6 +120,30 @@ export const forgetWorkspace = async (workspacePath: string): Promise<WorkspaceE
   return recent
 }
 
+// ─── Cloud workspace ────────────────────────────────────
+//
+// A cloud workspace has no checkout: the model works through the GitHub
+// connector instead of a terminal. It is stored so the choice survives a
+// restart and can be re-declared in the system prompt.
+
+export const getCloudWorkspace = async (): Promise<CloudWorkspace | null> => {
+  const config = await getConfig()
+  const cloud = config.workspaces?.cloud
+  return cloud?.repoFullName && cloud?.branch
+    ? { repoFullName: cloud.repoFullName, branch: cloud.branch }
+    : null
+}
+
+export const setCloudWorkspace = async (
+  workspace: CloudWorkspace | null
+): Promise<CloudWorkspace | null> => {
+  const config = await getConfig()
+  await setConfig({
+    workspaces: { ...(config.workspaces ?? {}), cloud: workspace }
+  } as Partial<AppConfig>)
+  return workspace
+}
+
 // ─── GitHub ─────────────────────────────────────────────
 
 const githubRequest = async (token: string, urlPath: string): Promise<unknown> => {
@@ -141,6 +166,16 @@ const githubRequest = async (token: string, urlPath: string): Promise<unknown> =
     throw new Error(`GitHub request failed with status ${response.status}`)
   }
   return response.json()
+}
+
+/** Branches of a repository, so a cloud workspace can target one explicitly. */
+export const listGithubBranches = async (token: string, fullName: string): Promise<string[]> => {
+  const branches = (await githubRequest(
+    token,
+    `/repos/${fullName}/branches?per_page=100`
+  )) as Array<Record<string, unknown>>
+  if (!Array.isArray(branches)) return []
+  return branches.map((branch) => String(branch.name ?? '')).filter(Boolean)
 }
 
 /**

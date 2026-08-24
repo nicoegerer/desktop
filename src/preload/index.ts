@@ -191,6 +191,11 @@ const api = {
   listGithubRepositories: () => ipcRenderer.invoke('workspace:github:repos'),
   prepareGithubWorkspace: (fullName: string) =>
     ipcRenderer.invoke('workspace:github:prepare', fullName),
+  listGithubBranches: (fullName: string) =>
+    ipcRenderer.invoke('workspace:github:branches', fullName),
+  getCloudWorkspace: () => ipcRenderer.invoke('workspace:cloud:get'),
+  setCloudWorkspace: (workspace: { repoFullName: string; branch: string } | null) =>
+    ipcRenderer.invoke('workspace:cloud:set', workspace),
   listWorkspaceTerminals: () => ipcRenderer.invoke('workspace:terminals'),
   openWorkspace: (workspacePath: string) => ipcRenderer.invoke('workspace:open', workspacePath),
   closeWorkspace: (workspacePath: string) => ipcRenderer.invoke('workspace:close', workspacePath),
