@@ -181,26 +181,18 @@ const api = {
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
 
   // Workspaces
-  listWorkspaces: () => ipcRenderer.invoke('workspace:list'),
-  getWorkspacesRoot: () => ipcRenderer.invoke('workspace:root'),
   rememberWorkspace: (workspacePath: string, repoFullName?: string) =>
     ipcRenderer.invoke('workspace:remember', workspacePath, repoFullName),
-  forgetWorkspace: (workspacePath: string) =>
-    ipcRenderer.invoke('workspace:forget', workspacePath),
-  getGithubWorkspaceStatus: () => ipcRenderer.invoke('workspace:github:status'),
-  listGithubRepositories: () => ipcRenderer.invoke('workspace:github:repos'),
-  prepareGithubWorkspace: (fullName: string) =>
-    ipcRenderer.invoke('workspace:github:prepare', fullName),
-  listGithubBranches: (fullName: string) =>
-    ipcRenderer.invoke('workspace:github:branches', fullName),
-  getCloudWorkspace: () => ipcRenderer.invoke('workspace:cloud:get'),
-  setCloudWorkspace: (workspace: { repoFullName: string; branch: string } | null) =>
-    ipcRenderer.invoke('workspace:cloud:set', workspace),
-  listWorkspaceTerminals: () => ipcRenderer.invoke('workspace:terminals'),
-  openWorkspace: (workspacePath: string) => ipcRenderer.invoke('workspace:open', workspacePath),
-  closeWorkspace: (workspacePath: string) => ipcRenderer.invoke('workspace:close', workspacePath),
-  activateWorkspace: (workspacePath: string) =>
-    ipcRenderer.invoke('workspace:activate', workspacePath),
+  // ── Guest bridge ────────────────────────────────────
+  // Called by the script injected into the Open WebUI page. The relay passes
+  // the whole request object, so these take one argument and never throw —
+  // a rejected promise there would surface as a broken chat control.
+  workspaceChooseFolder: () => ipcRenderer.invoke('workspace:chip:choose-folder'),
+  workspaceRecent: () => ipcRenderer.invoke('workspace:chip:recent'),
+  workspaceListRepos: () => ipcRenderer.invoke('workspace:chip:repos'),
+  workspaceOpenLocal: (request: { path: string }) =>
+    ipcRenderer.invoke('workspace:chip:open', request?.path),
+
   syncOpenWebUI: () => ipcRenderer.invoke('open-webui:sync'),
 
   // Updater

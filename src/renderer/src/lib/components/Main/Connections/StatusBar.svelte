@@ -17,14 +17,11 @@
     llamaCppInstalled: boolean
     activeLog: string | null
     activeManagedServiceId: string | null
-    workspaceLabel: string
-    workspaceBusy: boolean
     onSelectLog: (log: string) => void
     onSelectManagedService: (service: ManagedServiceSnapshot) => void
     onStartServer: () => void
     onToggleOpenTerminal: () => void
     onToggleLlamaCpp: () => void
-    onChooseWorkspace: () => void
   }
 
   let {
@@ -37,14 +34,11 @@
     llamaCppInstalled,
     activeLog,
     activeManagedServiceId,
-    workspaceLabel,
-    workspaceBusy,
     onSelectLog,
     onSelectManagedService,
     onStartServer,
     onToggleOpenTerminal,
-    onToggleLlamaCpp,
-    onChooseWorkspace
+    onToggleLlamaCpp
   }: Props = $props()
 
   // Derived server state
@@ -71,9 +65,6 @@
   const showServer = $derived(openWebuiInstalled || !!serverStatus)
   const showTerminal = $derived(openTerminalInstalled || !!openTerminalStatus)
   const showLlama = $derived(llamaCppInstalled || !!llamaCppStatus)
-  const isGerman =
-    typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('de')
-  const l = (german: string, english: string): string => (isGerman ? german : english)
 </script>
 
 <div
@@ -202,29 +193,6 @@
   {/if}
 
   <ManagedServicesStatus {activeManagedServiceId} onSelectService={onSelectManagedService} />
-
-  <div class="w-px h-3 bg-black/[0.08] dark:bg-white/[0.08] mx-0.5"></div>
-
-  <!-- Opens the workspace manager. Which workspace a conversation uses is
-       chosen per chat through Open WebUI's cloud menu, not here. -->
-  <button
-    class="flex max-w-[260px] items-center gap-1.5 rounded-md border-none bg-transparent px-2 py-0.5 text-[11px] text-[#1d1d1f] transition-all hover:bg-black/[0.04] dark:text-[#fafafa] dark:hover:bg-white/[0.06] {workspaceLabel
-      ? 'opacity-70 hover:opacity-95'
-      : 'opacity-40 hover:opacity-75'} disabled:cursor-wait disabled:opacity-30"
-    disabled={workspaceBusy}
-    onclick={onChooseWorkspace}
-    use:tooltip={workspaceLabel
-      ? l(
-          'Arbeitsbereich wechseln — im Chat wählt das Wolken-Symbol den lokalen Ordner',
-          'Switch workspace — in a chat the cloud icon picks the local folder'
-        )
-      : l('Arbeitsbereich wählen: lokaler Ordner oder Cloud', 'Choose a workspace: local folder or cloud')}
-  >
-    <span aria-hidden="true">{workspaceBusy ? '…' : '⌁'}</span>
-    <span class="truncate">
-      {workspaceLabel || l('Arbeitsbereich', 'Workspace')}
-    </span>
-  </button>
 
   <!-- Version (right-aligned) -->
   <span class="ml-auto text-[10px] opacity-25 select-none">v{$appInfo?.version ?? ''}</span>

@@ -9,13 +9,11 @@
   import StatusBar from './Connections/StatusBar.svelte'
   import LogPanel from './Connections/LogPanel.svelte'
   import ManagedServiceLogPanel from '../../services/ManagedServiceLogPanel.svelte'
-  import WorkspacePicker from './Connections/WorkspacePicker.svelte'
   import type {
     ManagedServiceSnapshot,
     OpenWebUISyncResult,
     WorkspaceTerminal
   } from '../../../../../shared/services/types'
-  import type { CloudWorkspace } from '../../../../../shared/services/tool-servers'
 
   interface Props {
     onOpenSettings: (tab?: string) => void
@@ -83,10 +81,6 @@
   let workspaceBusy = $state(false)
   let workspaceFeedback = $state<{ kind: 'success' | 'error'; message: string } | null>(null)
   let workspaceFeedbackTimer: ReturnType<typeof setTimeout> | null = null
-  let workspacePickerOpen = $state(false)
-  let workspaceStatus = $state('')
-  let workspaceTerminals = $state<WorkspaceTerminal[]>([])
-  let cloudWorkspace = $state<CloudWorkspace | null>(null)
 
   // Connector registration in Open WebUI
   const TOOL_SERVER_SYNC_DEBOUNCE_MS = 600
@@ -564,7 +558,6 @@
         openTerminalInfo = data.data
         openTerminalStatus = data.data?.status ?? null
         openTerminalSetupStatus = ''
-        void refreshWorkspaceTerminals()
         syncOpenWebUIRegistration()
         return
       }
@@ -618,7 +611,6 @@
 
     // Register connectors that were autostarted before this view existed
     syncOpenWebUIRegistration()
-    void refreshWorkspaceTerminals()
 
     // Check if Open Terminal package is installed
     window.electronAPI.getOpenTerminalStatus().then((installed: boolean) => {
@@ -653,126 +645,6 @@
       () => (workspaceFeedback = null),
       kind === 'error' ? 9000 : 7000
     )
-  }
-
-  const comparableWorkspacePath = (value: string): string => {
-    const normalized = value.trim().replace(/[\\/]+$/, '')
-    return /^[a-z]:[\\/]/i.test(normalized) ? normalized.toLowerCase() : normalized
-  }
-
-  /**
-   * Point Open Terminal at a folder and register it in the bundled Open WebUI,
-   * so a chat can read, edit, and run commands inside it.
-   */
-  const openWorkspace = async (folder: string, repoFullName?: string): Promise<void> => {
-    if (!folder) return
-
-    workspaceBusy = true
-    workspaceFeedback = null
-    try {
-      if (repoFullName) await window.electronAPI.rememberWorkspace(folder, repoFullName)
-
-      const { terminal, sync } = await window.electronAPI.openWorkspace(folder)
-      if (!terminal?.url) {
-        throw new Error('Open Terminal could not be started for the selected workspace.')
-      }
-
-      openTerminalInfo = terminal
-      openTerminalStatus = 'started'
-      openTerminalInstalled = true
-      await refreshWorkspaceTerminals()
-
-      if (sync?.status === 'failed' || sync?.status === 'skipped') {
-        reportRegistration(sync)
-        showWorkspaceFeedback(
-          'error',
-          l(
-            `„${terminal.cwd}“ läuft, ist aber noch nicht in Open WebUI registriert. Die Registrierung wird wiederholt.`,
-            `“${terminal.cwd}” is running but not registered in Open WebUI yet; registration will be retried.`
-          )
-        )
-        return
-      }
-
-      showWorkspaceFeedback(
-        'success',
-        l(
-          `Arbeitsbereich „${terminal.cwd}“ bereit. Im Chat über das Wolken-Symbol auswählen.`,
-          `Workspace “${terminal.cwd}” is ready. Select it from the cloud icon in chat.`
-        )
-      )
-    } catch (cause) {
-      showWorkspaceFeedback('error', cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      workspaceBusy = false
-      workspaceStatus = ''
-    }
-  }
-
-  const closeWorkspace = async (folder: string): Promise<void> => {
-    workspaceBusy = true
-    try {
-      await window.electronAPI.closeWorkspace(folder)
-      await refreshWorkspaceTerminals()
-      openTerminalInfo = await window.electronAPI.getOpenTerminalInfo()
-      if (!workspaceTerminals.length) openTerminalStatus = null
-    } catch (cause) {
-      showWorkspaceFeedback('error', cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      workspaceBusy = false
-    }
-  }
-
-  const refreshWorkspaceTerminals = async (): Promise<void> => {
-    workspaceTerminals = await window.electronAPI.listWorkspaceTerminals()
-    cloudWorkspace = await window.electronAPI.getCloudWorkspace()
-  }
-
-  /**
-   * A cloud workspace has no terminal — the model edits the repository through
-   * the GitHub connector, so selecting one only has to reach the system prompt.
-   */
-  const selectCloudWorkspace = async (workspace: CloudWorkspace | null): Promise<void> => {
-    workspaceBusy = true
-    try {
-      const { workspace: applied, sync } = await window.electronAPI.setCloudWorkspace(workspace)
-      cloudWorkspace = applied
-      reportRegistration(sync)
-      if (sync?.status !== 'failed') {
-        showWorkspaceFeedback(
-          'success',
-          applied
-            ? l(
-                `Cloud-Arbeitsbereich: ${applied.repoFullName} (${applied.branch}). Das Modell arbeitet ohne lokalen Klon über GitHub.`,
-                `Cloud workspace: ${applied.repoFullName} (${applied.branch}). The model works through GitHub without a local clone.`
-              )
-            : l('Cloud-Arbeitsbereich beendet.', 'Cloud workspace left.')
-        )
-      }
-    } catch (cause) {
-      showWorkspaceFeedback('error', cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      workspaceBusy = false
-    }
-  }
-
-  /** What the status bar shows: the active way of working, not a count. */
-  const workspaceStatusLabel = $derived(
-    cloudWorkspace
-      ? `${l('Cloud', 'Cloud')} · ${cloudWorkspace.repoFullName.split('/').pop()}`
-      : (() => {
-          const open = workspaceTerminals.filter((terminal) => terminal.status === 'started')
-          if (open.length === 0) return ''
-          if (open.length === 1) {
-            return `${l('Lokal', 'Local')} · ${open[0].cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()}`
-          }
-          return `${l('Lokal', 'Local')} · ${open.length}`
-        })()
-  )
-
-  const chooseWorkspace = (): void => {
-    workspaceFeedback = null
-    workspacePickerOpen = true
   }
 
   const toggleOpenTerminal = async () => {
@@ -923,23 +795,6 @@
     />
   {/if}
 
-  {#if workspacePickerOpen}
-    <WorkspacePicker
-      terminals={workspaceTerminals}
-      busy={workspaceBusy}
-      statusText={workspaceStatus}
-      onClose={() => (workspacePickerOpen = false)}
-      {cloudWorkspace}
-      onOpen={openWorkspace}
-      onCloseWorkspace={closeWorkspace}
-      onSelectCloud={selectCloudWorkspace}
-      onConnectGithub={() => {
-        workspacePickerOpen = false
-        onOpenSettings('services')
-      }}
-    />
-  {/if}
-
   {#if workspaceFeedback}
     <div
       class="fixed bottom-10 left-1/2 z-[100] max-w-[min(680px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border px-4 py-2.5 text-[11px] shadow-xl backdrop-blur {workspaceFeedback.kind ===
@@ -962,8 +817,6 @@
     llamaCppInstalled={!!llamaCppInfo?.binaryPath}
     {activeLog}
     activeManagedServiceId={activeManagedService?.id ?? null}
-    workspaceLabel={workspaceStatusLabel}
-    {workspaceBusy}
     onSelectLog={selectLog}
     onSelectManagedService={selectManagedService}
     onStartServer={async () => {
@@ -980,6 +833,5 @@
     }}
     onToggleOpenTerminal={toggleOpenTerminal}
     onToggleLlamaCpp={toggleLlamaCpp}
-    onChooseWorkspace={chooseWorkspace}
   />
 </div>

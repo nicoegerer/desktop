@@ -36,47 +36,59 @@ instead of deleting the entry, so bearer keys and filters survive a restart.
 The Open WebUI account must be an **admin**; tool-server configuration is an admin API. A non-admin
 session is reported in the desktop status toast and nothing is written.
 
-Open WebUI selects tools per chat, so a registered connector would still start every conversation
-switched off. The desktop therefore also writes its connectors into the signed-in user's default
-tool selection (`settings.ui.tools`), which is what a new chat falls back to when the model carries
-no tool list of its own. Garmin MCP and GitHub MCP are available from the first message without
-touching the tools menu.
+### Always active, not in the tools menu
 
-They remain listed in that menu and can still be switched off for a single conversation. Hiding
-them entirely is not possible from the desktop app: the menu is rendered by Open WebUI from every
-registered tool server, and the only way to remove an entry is to disable the connector, which would
-also stop the model from calling it.
+Open WebUI selects tools per conversation, so a registered connector would still start every chat
+switched off. Two things prevent that:
+
+- The connector tool ids are added to the signed-in user's default tool selection
+  (`settings.ui.tools`), which is what a chat falls back to when its model carries no tool list.
+- Every request to `/api/chat/completions` is rewritten in the page so it carries those ids, whether
+  or not anything is selected. See [Workspaces](#workspaces) for how that rewriting works.
+
+Because the connectors are always active, their rows are hidden from the chat's tools menu. The rows
+carry no identifying attribute, so they are matched by the connector name the desktop registered them
+under; if Open WebUI changes that markup the rows simply reappear and the connectors keep working.
 
 ## Workspaces
 
-The **Workspace** button in the bottom chat status bar chooses how the model works on a project. It
-offers two modes.
+A workspace is chosen **per conversation**, from a chip next to the message box. The desktop status
+bar carries no workspace control.
+
+Open WebUI owns the chat interface, so the chip is added to the page from the outside: after the
+embedded page loads, the desktop injects a script into it. That script does two things.
+
+- It patches `fetch` for `/api/chat/completions`. The workspace picked for that conversation, and the
+  connector tool ids, are written into the request body. The body is a far more stable contract than
+  the page's markup, so the behaviour does not depend on any DOM detail and cannot be undone by
+  Open WebUI's own menus.
+- It renders the chip and hides the connector rows. Both are cosmetic: if an anchor is not found, the
+  chat is left exactly as it was.
+
+The selection is stored per chat id in the page's `localStorage`, so different conversations can work
+in different places at the same time. A conversation that has not been saved yet shares a `draft`
+slot and keeps its workspace once it gets an id.
 
 ### Local
 
-A local folder gets its own Open Terminal instance. Because Open WebUI selects a terminal server per
-conversation, several folders can be open at once and each chat picks its own: click the cloud icon
-in the message box and select the workspace by name.
+Pick **Lokal → Ordner öffnen …** for a native folder dialog; any folder on the machine works, it does
+not have to be below a particular root. The desktop starts an Open Terminal instance for it, registers
+it as a terminal server named after the folder with a stable id of `desktop-ws-<hash>`, and the chip
+stores that id for the conversation. Every request from that chat then carries `terminal_id`, so a
+tool-capable model can create and edit files, run commands, use Git, install dependencies, and
+execute builds and tests there.
 
-Every open workspace is registered as a terminal server named after its folder, with a stable id of
-`desktop-ws-<hash>`. A tool-capable model can then create and edit files, run commands, use Git,
-install dependencies, and execute builds and tests in that folder. Open workspaces are remembered
-and reopened on the next launch.
+Several folders can be open at once — one terminal each — and they are reopened on the next launch.
 
 ### Cloud
 
-A cloud workspace is a GitHub repository and branch that is **not** checked out. The model reads and
-writes through the GitHub connector and commits straight to the selected branch, so nothing is
-cloned and no terminal is started. Pick a repository, then its branch; the choice is declared in the
-user's system prompt inside a delimited block, so anything written there by hand is preserved and
-leaving cloud mode removes the block again.
+Pick **Cloud** for a list of the repositories the GitHub connector's token can reach. Selecting one
+makes it the workspace for that conversation **without a checkout**: no clone, no terminal. The
+request carries a system message naming the repository and branch and telling the model to work
+through the GitHub tools and commit to that branch, so it does not look for files on disk.
 
-Only one cloud workspace is active at a time, because Open WebUI offers no per-chat control for it —
-unlike local workspaces, which map onto terminal servers.
-
-Local clones created by earlier versions live under `~/OpenWebUI Workspaces`, overridable with
-`workspaces.root` in the desktop config. Cloning requires `git` on `PATH`; the token is passed
-through the environment so it never appears in process arguments.
+Switching workspace mid-conversation replaces that instruction rather than stacking a second one, and
+switching back to a local folder removes it.
 
 ## GitHub MCP preset
 

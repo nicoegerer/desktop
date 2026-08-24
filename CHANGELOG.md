@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.9] - 2026-08-24
+
+### Changed
+
+- **The workspace is picked per conversation, in the chat.** A chip next to the message box offers
+  **Lokal** and **Cloud**. Lokal opens a native folder dialog — any folder on the machine, not only
+  ones already open or below a particular root — starts a terminal for it, and binds it to that
+  conversation. Cloud lists the repositories the GitHub connector can reach and works on one without
+  a checkout. Different conversations can work in different places at the same time.
+- **The desktop status bar no longer carries a workspace control.** The button and the manager it
+  opened are gone; the choice belongs to the chat.
+- **The cloud workspace is scoped to a conversation.** It travels in the chat request instead of the
+  account-wide system prompt, and the block written by the previous version is cleaned up on the next
+  sync.
+
+### Fixed
+
+- **Garmin MCP and GitHub MCP are no longer listed as tools that must be switched on.** This was the
+  known limitation of the previous release. Every chat request is rewritten in the page so it carries
+  the connector tool ids whether or not anything is selected, which makes the rows redundant, so they
+  are hidden from the tools menu.
+
+### Notes
+
+The workspace chip and the request rewriting are injected into the embedded Open WebUI page, because
+Open WebUI owns the chat interface. The rewriting targets the request body of
+`/api/chat/completions`, which is far more stable than the page's markup; the chip and the hidden
+rows are cosmetic and fail silently if Open WebUI changes its layout, leaving the chat untouched.
+
 ## [0.0.20-services.8] - 2026-08-24
 
 ### Added
