@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.13] - 2026-08-24
+
+### Fixed
+
+- **Every folder ever used stayed open and could not be deleted.** All previously active workspaces
+  were reopened on launch, and Open Terminal runs with the folder as its working directory, so each
+  one kept a handle on it — Windows then refuses to delete or move that folder. Workspaces are now
+  started when a conversation asks for one, and the page reports which ones its conversations still
+  point at so the rest are released.
+
+### Notes
+
+A connector that is active in every conversation also shapes what the model thinks it is. With no
+workspace selected, the only tools in the request are the connectors — 135 Garmin operations and
+GitHub MCP — and the model will describe itself as limited to Garmin, because for that request it
+was. Selecting a workspace adds the file and shell tools; narrowing Garmin through
+`function_name_filter_list` in Open WebUI's tool server settings keeps it available without letting
+it dominate.
+
 ## [0.0.20-services.12] - 2026-08-24
 
 ### Fixed

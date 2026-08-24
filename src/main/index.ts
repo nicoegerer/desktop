@@ -2056,6 +2056,32 @@ if (!gotTheLock) {
       }
     })
 
+    // The chat knows which workspaces its conversations still point at; the
+    // desktop only knows which terminals it started. Anything no longer
+    // referenced is stopped, so an unused folder stops being held open and can
+    // be deleted or moved.
+    ipcMain.handle('workspace:chip:keep-alive', async (_event, keep: string[]) => {
+      try {
+        const wanted = new Set(Array.isArray(keep) ? keep.filter((id) => typeof id === 'string') : [])
+        const stopped: string[] = []
+        for (const terminal of listWorkspaceTerminals()) {
+          if (wanted.has(terminal.id)) continue
+          await stopWorkspaceTerminal(terminal.cwd)
+          await setWorkspaceActive(terminal.cwd, false)
+          stopped.push(terminal.cwd)
+        }
+        if (stopped.length) {
+          log.info(`Released ${stopped.length} unused workspace(s): ${stopped.join(', ')}`)
+          sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
+          if (!listWorkspaceTerminals().length) sendToRenderer('status:open-terminal', 'stopped')
+          await syncOpenWebUI()
+        }
+        return { ok: true, stopped: stopped.length }
+      } catch (cause) {
+        return chipError(cause)
+      }
+    })
+
     ipcMain.handle('workspace:chip:open', async (_event, workspacePath: string) => {
       try {
         if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
@@ -2387,27 +2413,10 @@ if (!gotTheLock) {
 
     // Reopen the workspaces that were active in the previous session, so their
     // terminals are selectable in a chat without touching the picker first.
-    const restorableWorkspaces = (CONFIG?.workspaces?.active ?? []).filter(
-      (entry): entry is string => typeof entry === 'string' && !!entry.trim()
-    )
-    if (CONFIG?.openTerminal?.enabled && !restorableWorkspaces.length && CONFIG?.openTerminal?.cwd) {
-      restorableWorkspaces.push(CONFIG.openTerminal.cwd)
-    }
-
-    for (const workspacePath of restorableWorkspaces) {
-      try {
-        sendToRenderer('status:open-terminal', 'starting')
-        await startWorkspaceTerminal(workspacePath, (status) => {
-          sendToRenderer('status:open-terminal-setup', status)
-        })
-        sendToRenderer('status:open-terminal', 'started')
-        sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
-      } catch (error) {
-        log.error(`Auto-start Open Terminal failed for ${workspacePath}:`, error)
-        sendToRenderer('status:open-terminal', 'failed')
-      }
-    }
-    if (restorableWorkspaces.length) scheduleOpenWebUISync()
+    // Workspaces are started when a conversation asks for one, not on launch.
+    // Open Terminal runs with the folder as its working directory, so keeping
+    // every folder ever used open would hold a handle on each of them — that is
+    // what stopped an unused folder from being deleted.
 
     // Auto-start llama.cpp if previously enabled
     if (CONFIG?.llamaCpp?.enabled) {

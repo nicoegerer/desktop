@@ -48,13 +48,31 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     return m ? m[1] : 'draft';
   };
   var selection = function () { return readAll()[chatKey()] || null; };
+
+  /**
+   * Tell the desktop which workspaces are still spoken for. Only the page knows
+   * that, because the selections live per conversation in this store — and a
+   * workspace nobody points at keeps a handle on its folder for nothing.
+   */
+  var reportLiveWorkspaces = function () {
+    var all = readAll();
+    var ids = [];
+    for (var key in all) {
+      if (!Object.prototype.hasOwnProperty.call(all, key)) continue;
+      var entry = all[key];
+      if (entry && entry.mode === 'local' && entry.terminalId && ids.indexOf(entry.terminalId) === -1) {
+        ids.push(entry.terminalId);
+      }
+    }
+    ask('workspaceKeepAlive', { ids: ids });
+  };
   var select = function (value) {
     var all = readAll();
     if (value) { all[chatKey()] = value; } else { delete all[chatKey()]; }
     writeAll(all);
     // The page has to follow, otherwise the file browser and the terminal panel
     // would keep pointing at whatever was selected before.
-    applySelection(value);
+    applySelection(value, reportLiveWorkspaces);
   };
 
   // ── Request rewriting ───────────────────────────────
@@ -538,6 +556,8 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var observer = new MutationObserver(scheduleRender);
     observer.observe(document.body, { childList: true, subtree: true });
     scheduleRender();
+    // Release folders left open by conversations that no longer point at them.
+    reportLiveWorkspaces();
 
     window[FLAG] = {
       configure: function (next) { opts = next; repos = null; scheduleRender(); }

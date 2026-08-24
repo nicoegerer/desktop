@@ -56,15 +56,18 @@ test('the chat request is the only request that gets rewritten', () => {
 interface Harness {
   window: Record<string, unknown>
   calls: Array<{ url: string; body: unknown }>
+  bridge: Array<Record<string, unknown>>
   mutate: () => void
   flushFrames: (rounds?: number) => void
   settle: (rounds?: number) => Promise<void>
   renderCount: () => number
 }
 
-const run = (): Harness => {
+const run = (seed?: Record<string, unknown>): Harness => {
   const calls: Array<{ url: string; body: unknown }> = []
+  const bridge: Array<Record<string, unknown>> = []
   const store: Record<string, string> = {}
+  if (seed) store['desktop:workspace-selection'] = JSON.stringify(seed)
   let frames: Array<() => void> = []
   let observerCallback: (() => void) | null = null
   let renders = 0
@@ -144,6 +147,12 @@ const run = (): Harness => {
       return Promise.resolve({ ok: true })
     },
     addEventListener: () => {},
+    electronAPI: {
+      send: (data: Record<string, unknown>) => {
+        bridge.push(data)
+        return Promise.resolve(null)
+      }
+    },
     innerWidth: 1200,
     innerHeight: 800,
     requestAnimationFrame: (fn: () => void) => {
@@ -214,6 +223,7 @@ const run = (): Harness => {
   return {
     window: win,
     calls,
+    bridge,
     mutate: () => notify(),
     settle: async (rounds = 50) => {
       for (let i = 0; i < rounds; i++) {
@@ -277,4 +287,42 @@ test('rendering settles instead of driving itself in a loop', async () => {
 
   await h.settle()
   assert.equal(h.renderCount(), mounted, 'the page must go quiet once the chip is up')
+})
+
+// ─── Releasing unused folders ───────────────────────────
+
+test('only the workspaces conversations still point at are kept open', async () => {
+  const h = run({
+    'chat-123': { mode: 'local', terminalId: 'desktop-ws-aaa', label: 'test1' },
+    'chat-456': { mode: 'local', terminalId: 'desktop-ws-bbb', label: 'desktop' },
+    'chat-789': { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' }
+  })
+  await h.settle()
+
+  // Open Terminal runs with the folder as its working directory, so a folder
+  // held open for a conversation that no longer wants it cannot be deleted.
+  const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
+  assert.equal(keepAlive.length, 1)
+  assert.deepEqual(keepAlive[0].ids, ['desktop-ws-aaa', 'desktop-ws-bbb'])
+})
+
+test('a cloud-only conversation keeps no folder open', async () => {
+  const h = run({
+    'chat-789': { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' }
+  })
+  await h.settle()
+
+  const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
+  assert.deepEqual(keepAlive[0].ids, [])
+})
+
+test('the same folder used by two conversations is reported once', async () => {
+  const h = run({
+    'chat-1': { mode: 'local', terminalId: 'desktop-ws-aaa', label: 'test1' },
+    'chat-2': { mode: 'local', terminalId: 'desktop-ws-aaa', label: 'test1' }
+  })
+  await h.settle()
+
+  const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
+  assert.deepEqual(keepAlive[0].ids, ['desktop-ws-aaa'])
 })
