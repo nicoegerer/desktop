@@ -52,7 +52,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var all = readAll();
     if (value) { all[chatKey()] = value; } else { delete all[chatKey()]; }
     writeAll(all);
-    render();
+    scheduleRender();
   };
 
   // ── Request rewriting ───────────────────────────────
@@ -76,7 +76,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       // Never let the workspace layer break sending a message.
       console.warn('[desktop] workspace payload untouched:', e);
     }
-    return originalFetch.call(this, input, init);
+    // Always bound to window: the page calls fetch as a bare function inside
+    // strict-mode modules, where forwarding \`this\` would be undefined and the
+    // browser rejects the call outright.
+    return originalFetch.call(window, input, init);
   };
 
   // ── Desktop bridge ──────────────────────────────────
@@ -306,6 +309,13 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     });
   };
 
+  var CHIP_STYLE =
+    'all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;margin-left:2px;' +
+    'padding:2px 8px;border-radius:8px;font-size:13px;cursor:pointer;max-width:170px;' +
+    'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s;';
+
+  // Writes only what actually differs. The observer below reacts to DOM
+  // changes, so an unconditional write here would retrigger itself forever.
   var render = function () {
     hideConnectorRows();
     var row = findRow();
@@ -314,32 +324,56 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       chip = document.createElement('button');
       chip.type = 'button';
       chip.setAttribute('data-desktop-workspace', '1');
+      chip.style.cssText = CHIP_STYLE;
       chip.onclick = function (event) { event.preventDefault(); event.stopPropagation(); openPanel(); };
+      chip.onmouseenter = function () { chip.style.background = 'rgba(127,127,127,.14)'; };
+      chip.onmouseleave = function () { chip.style.background = 'transparent'; };
       row.appendChild(chip);
     }
     var s = selection();
-    chip.textContent = (s && s.mode === 'cloud' ? '☁ ' : s ? '📁 ' : '⌁ ') + label();
-    chip.title = s
+    var text = (s && s.mode === 'cloud' ? '☁ ' : s ? '📁 ' : '⌁ ') + label();
+    if (chip.textContent !== text) chip.textContent = text;
+    var title = s
       ? t('Arbeitsbereich dieses Chats ändern', 'Change this conversation’s workspace')
       : t('Arbeitsbereich für diesen Chat wählen', 'Choose a workspace for this conversation');
-    chip.style.cssText =
-      'all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;margin-left:2px;' +
-      'padding:2px 8px;border-radius:8px;font-size:13px;cursor:pointer;max-width:170px;' +
-      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s;' +
-      'opacity:' + (s ? '.85' : '.5') + ';';
-    chip.onmouseenter = function () { chip.style.background = 'rgba(127,127,127,.14)'; };
-    chip.onmouseleave = function () { chip.style.background = 'transparent'; };
+    if (chip.title !== title) chip.title = title;
+    var opacity = s ? '0.85' : '0.5';
+    if (chip.style.opacity !== opacity) chip.style.opacity = opacity;
   };
 
-  document.addEventListener('click', function () { closePanel(); });
-  window.addEventListener('popstate', render);
-
-  var observer = new MutationObserver(function () { render(); });
-  observer.observe(document.body, { childList: true, subtree: true });
-  render();
-
-  window[FLAG] = {
-    configure: function (next) { opts = next; repos = null; render(); }
+  // Rendering mutates the DOM, which the observer would see as new work. The
+  // flag drops those self-inflicted rounds and the frame keeps a burst of page
+  // updates down to one render.
+  var rendering = false;
+  var scheduled = false;
+  var scheduleRender = function () {
+    if (rendering || scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(function () {
+      scheduled = false;
+      rendering = true;
+      try { render(); } catch (e) { console.warn('[desktop] workspace chip:', e); }
+      rendering = false;
+    });
   };
+
+  // Everything past the request rewriting is presentation. If any of it throws
+  // while wiring up, the page must be left exactly as Open WebUI built it — a
+  // broken chip is a nuisance, a broken chat is not usable at all.
+  try {
+    document.addEventListener('click', function () { closePanel(); });
+    window.addEventListener('popstate', scheduleRender);
+
+    var observer = new MutationObserver(scheduleRender);
+    observer.observe(document.body, { childList: true, subtree: true });
+    scheduleRender();
+
+    window[FLAG] = {
+      configure: function (next) { opts = next; repos = null; scheduleRender(); }
+    };
+  } catch (e) {
+    console.warn('[desktop] workspace chip disabled:', e);
+    window[FLAG] = { configure: function () {} };
+  }
 })();
 `

@@ -47,12 +47,210 @@ test('the chat request is the only request that gets rewritten', () => {
   assert.ok(source.includes("url.indexOf('/api/chat/completions')"))
 })
 
-test('a rewriting failure leaves the request untouched', () => {
-  const source = script()
+// ─── Running the script ─────────────────────────────────
+//
+// The checks above only read the source. These execute it against a stub of the
+// browser surface it touches, because the failures that matter — a rejected
+// fetch, a render loop — only appear when it runs.
 
-  // The patch sits in front of every request the page makes, so it must never
-  // be able to stop one.
-  const patch = source.slice(source.indexOf('window.fetch = function'))
-  assert.ok(patch.includes('catch'))
-  assert.ok(patch.includes('return originalFetch.call(this, input, init)'))
+interface Harness {
+  window: Record<string, unknown>
+  calls: Array<{ url: string; body: unknown }>
+  mutate: () => void
+  flushFrames: (rounds?: number) => void
+  settle: (rounds?: number) => Promise<void>
+  renderCount: () => number
+}
+
+const run = (): Harness => {
+  const calls: Array<{ url: string; body: unknown }> = []
+  const store: Record<string, string> = {}
+  let frames: Array<() => void> = []
+  let observerCallback: (() => void) | null = null
+  let renders = 0
+  // A real MutationObserver delivers as a microtask, so a runaway render shows
+  // up as an unbounded chain of callbacks rather than a stack overflow.
+  let queued = 0
+  const notify = (): void => {
+    if (!observerCallback || queued > 200) return
+    queued++
+    queueMicrotask(() => {
+      queued--
+      observerCallback?.()
+    })
+  }
+
+  const element = (): Record<string, unknown> => {
+    let text = ''
+    const node: Record<string, unknown> = {
+      style: { cssText: '', opacity: '', background: '' },
+      dataset: {},
+      title: '',
+      isConnected: true,
+      children: [] as unknown[],
+      setAttribute: () => {},
+      appendChild: (child: unknown) => {
+        renders++
+        ;(node.children as unknown[]).push(child)
+        notify()
+      },
+      removeChild: () => {},
+      getBoundingClientRect: () => ({ left: 0, top: 0 })
+    }
+    // Assigning textContent replaces the element's text node, which a
+    // childList observer reports — that is what turned an unconditional write
+    // into an endless render loop.
+    Object.defineProperty(node, 'textContent', {
+      get: () => text,
+      set: (value: string) => {
+        text = value
+        renders++
+        notify()
+      }
+    })
+    return node
+  }
+
+  const row = element()
+  const anchor = element()
+  const other = element()
+  anchor.parentElement = row
+  row.contains = (node: unknown) => node === other || node === anchor
+  ;(row as Record<string, unknown>).parentElement = null
+
+  const win: Record<string, unknown> = {
+    fetch: (url: unknown, init: unknown) => {
+      // Mirrors the browser: the real fetch is bound to window and throws when
+      // invoked with any other receiver.
+      // eslint-disable-next-line @typescript-eslint/no-invalid-this
+      calls.push({ url: String(url), body: (init as { body?: string })?.body })
+      return Promise.resolve({ ok: true })
+    },
+    addEventListener: () => {},
+    innerWidth: 1200,
+    innerHeight: 800,
+    requestAnimationFrame: (fn: () => void) => {
+      frames.push(fn)
+      return frames.length
+    },
+    localStorage: {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v
+      }
+    },
+    location: { pathname: '/c/chat-123' },
+    console: { warn: () => {} },
+    MutationObserver: class {
+      constructor(cb: () => void) {
+        observerCallback = cb
+      }
+      observe(): void {}
+      disconnect(): void {}
+    }
+  }
+
+  // The real fetch rejects a foreign receiver; reproduce that so a `.call(this)`
+  // from a strict-mode module is caught here instead of in the app.
+  const boundFetch = win.fetch as (...args: unknown[]) => unknown
+  win.fetch = function (this: unknown, ...args: unknown[]) {
+    if (this !== win) throw new TypeError("Illegal invocation")
+    return boundFetch(...args)
+  }
+
+  const doc: Record<string, unknown> = {
+    body: element(),
+    addEventListener: () => {},
+    createElement: () => element(),
+    getElementById: (id: string) =>
+      id === 'input-menu-button' ? anchor : id === 'integration-menu-button' ? other : null,
+    querySelectorAll: () => [] as unknown[]
+  }
+
+  const fn = new Function(
+    'window',
+    'document',
+    'localStorage',
+    'location',
+    'console',
+    'MutationObserver',
+    'requestAnimationFrame',
+    script()
+  )
+  fn(
+    win,
+    doc,
+    win.localStorage,
+    win.location,
+    win.console,
+    win.MutationObserver,
+    win.requestAnimationFrame
+  )
+
+  return {
+    window: win,
+    calls,
+    mutate: () => notify(),
+    settle: async (rounds = 50) => {
+      for (let i = 0; i < rounds; i++) {
+        const due = frames
+        frames = []
+        due.forEach((f) => f())
+        await Promise.resolve()
+      }
+    },
+    flushFrames: (rounds = 5) => {
+      for (let i = 0; i < rounds; i++) {
+        const due = frames
+        frames = []
+        due.forEach((f) => f())
+      }
+    },
+    renderCount: () => renders
+  }
+}
+
+test('a bare fetch call still works after the patch', async () => {
+  const h = run()
+
+  // Open WebUI's bundles are strict-mode modules, so `fetch(...)` arrives with
+  // an undefined receiver. Forwarding that receiver made every request in the
+  // page fail and the app never finished loading.
+  const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+  await assert.doesNotReject(() => detached('/api/v1/models'))
+  assert.equal(h.calls.length, 1)
+})
+
+test('a chat request is rewritten without breaking the call', async () => {
+  const h = run()
+  const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+
+  await detached('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] })
+  })
+
+  const sent = JSON.parse(String(h.calls[0].body))
+  assert.deepEqual(sent.tool_ids, ['server:desktop-garmin', 'server:mcp:desktop-github-mcp'])
+})
+
+test('a request the page makes with no init is passed through', async () => {
+  const h = run()
+  const detached = h.window.fetch as (url: string) => Promise<unknown>
+
+  await assert.doesNotReject(() => detached('/api/config'))
+})
+
+test('rendering settles instead of driving itself in a loop', async () => {
+  const h = run()
+
+  // Mounting the chip and writing its label are themselves DOM changes the
+  // observer reports. Without idempotent writes each render schedules the next
+  // one and the page never goes idle.
+  await h.settle()
+  const mounted = h.renderCount()
+  assert.ok(mounted > 0, 'the chip should have been mounted')
+
+  await h.settle()
+  assert.equal(h.renderCount(), mounted, 'the page must go quiet once the chip is up')
 })
