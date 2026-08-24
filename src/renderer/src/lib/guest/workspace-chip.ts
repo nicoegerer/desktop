@@ -52,7 +52,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var all = readAll();
     if (value) { all[chatKey()] = value; } else { delete all[chatKey()]; }
     writeAll(all);
-    scheduleRender();
+    // The page has to follow, otherwise the file browser and the terminal panel
+    // would keep pointing at whatever was selected before.
+    applySelection(value);
   };
 
   // ── Request rewriting ───────────────────────────────
@@ -88,29 +90,53 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     return window.electronAPI.send(Object.assign({ type: type }, data || {}));
   };
 
-  // ── Tools menu ──────────────────────────────────────
-  // The rows carry no identifying attribute, so they are matched by the
-  // connector name the desktop registered them under.
-  var hideConnectorRows = function () {
-    if (!opts.hiddenToolNames.length) return;
-    var candidates = document.querySelectorAll('button, [role="menuitem"], [role="option"]');
-    for (var i = 0; i < candidates.length; i++) {
-      var row = candidates[i];
-      if (row.dataset && row.dataset.desktopHidden) continue;
-      var label = (row.textContent || '').trim();
-      if (!label) continue;
-      for (var j = 0; j < opts.hiddenToolNames.length; j++) {
-        if (label === opts.hiddenToolNames[j]) {
-          row.dataset.desktopHidden = '1';
-          row.style.display = 'none';
-          break;
-        }
+  // ── Open WebUI chrome ───────────────────────────────
+  // The connectors are active in every conversation, so Open WebUI's count of
+  // "available tools" only ever reports them. It is hidden while that is all it
+  // would show; adding a tool of your own brings it back.
+  var STYLE_ID = 'desktop-workspace-style';
+  var ensureStyle = function () {
+    if (document.getElementById(STYLE_ID)) return;
+    var style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent =
+      'html.desktop-hide-terminal-menu [data-desktop-terminal-menu] {' +
+      'position:absolute !important;width:1px;height:1px;overflow:hidden;' +
+      'clip:rect(0 0 0 0);white-space:nowrap;}' +
+      'html.desktop-hide-tool-count button[aria-label="Available Tools"]{display:none !important;}';
+    (document.head || document.documentElement).appendChild(style);
+  };
+
+  var tidyOpenWebUIChrome = function () {
+    ensureStyle();
+
+    var counter = document.querySelector('button[aria-label="Available Tools"]');
+    var shown = counter ? parseInt((counter.textContent || '').replace(/[^0-9]+/g, ''), 10) : 0;
+    var onlyOurs = !counter || !(shown > opts.alwaysOnToolIds.length);
+    document.documentElement.classList.toggle('desktop-hide-tool-count', onlyOurs);
+
+    // If a tool of the user's own is active the panel stays reachable, so the
+    // connector rows in it are hidden individually.
+    if (!onlyOurs && opts.hiddenToolNames.length) {
+      var labels = document.querySelectorAll('div, span');
+      for (var i = 0; i < labels.length; i++) {
+        var node = labels[i];
+        if (node.dataset && node.dataset.desktopHidden) continue;
+        if (node.children && node.children.length) continue;
+        var text = (node.textContent || '').trim();
+        if (opts.hiddenToolNames.indexOf(text) === -1) continue;
+        var row = node.closest ? node.closest('button, [role="button"]') : null;
+        if (!row) continue;
+        node.dataset.desktopHidden = '1';
+        row.style.display = 'none';
       }
     }
   };
 
   // ── Chip ────────────────────────────────────────────
   var chip = null;
+  var chipIcon = null;
+  var chipLabel = null;
   var panel = null;
   var mode = 'local';
   var repos = null;
@@ -130,6 +156,92 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var closePanel = function () {
     if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
     panel = null;
+  };
+
+  // ── Driving Open WebUI's own selection ──────────────
+  //
+  // Which folder a conversation works in lives in a store inside Open WebUI's
+  // bundle, and the file browser and terminal panel read it. Nothing outside
+  // the page can write it, so the chip operates Open WebUI's own terminal menu
+  // instead — its click is the page's click, and everything follows.
+  //
+  // If that ever stops working, the menu is shown again rather than leaving a
+  // chip that looks authoritative but selects nothing.
+  var remoteControlBroken = false;
+
+  var findTerminalMenuButton = function () {
+    var buttons = document.querySelectorAll('button[type="button"]');
+    for (var i = 0; i < buttons.length; i++) {
+      var b = buttons[i];
+      if (b === chip) continue;
+      var cls = b.getAttribute('class') || '';
+      if (cls.indexOf('translate-y-[1px]') === -1) continue;
+      if (cls.indexOf('text-[13px]') === -1) continue;
+      if (!b.querySelector('svg')) continue;
+      return b;
+    }
+    return null;
+  };
+
+  var markTerminalMenu = function () {
+    var button = findTerminalMenuButton();
+    if (!button) return null;
+    var host = button.parentElement;
+    while (host && host.querySelectorAll('button').length < 2 && host.parentElement) {
+      if (host.getAttribute('class') && host.contains(button)) break;
+      host = host.parentElement;
+    }
+    (host || button).setAttribute('data-desktop-terminal-menu', '1');
+    return button;
+  };
+
+  var setMenuHidden = function (hidden) {
+    document.documentElement.classList.toggle('desktop-hide-terminal-menu', !!hidden);
+  };
+
+  var entryWithText = function (text, skip) {
+    var buttons = document.querySelectorAll('button');
+    for (var i = 0; i < buttons.length; i++) {
+      var b = buttons[i];
+      if (b === chip || b === skip) continue;
+      if ((b.textContent || '').trim() === text) return b;
+    }
+    return null;
+  };
+
+  /**
+   * Select \`wanted\` in Open WebUI's terminal menu, or clear the selection when
+   * it is null. Reports whether the page ended up in the requested state.
+   */
+  var driveSelection = function (wanted, done) {
+    var button = markTerminalMenu();
+    if (!button) { done(false); return; }
+
+    var current = (button.textContent || '').trim();
+    if (wanted && current === wanted) { done(true); return; }
+    if (!wanted && !current) { done(true); return; }
+
+    button.click();
+    setTimeout(function () {
+      // Clearing works by toggling the entry that is currently selected.
+      var target = entryWithText(wanted || current, button);
+      if (target) target.click();
+      setTimeout(function () {
+        var now = (button.textContent || '').trim();
+        var ok = wanted ? now === wanted : !now;
+        if (!ok && target === null) button.click(); // leave the menu closed
+        done(ok);
+      }, 80);
+    }, 80);
+  };
+
+  var applySelection = function (selected, done) {
+    driveSelection(selected && selected.mode === 'local' ? selected.label : null, function (ok) {
+      remoteControlBroken = !ok;
+      setMenuHidden(!remoteControlBroken);
+      scheduleRender();
+      if (done) done(ok);
+    });
   };
 
   var label = function () {
@@ -310,14 +422,29 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   };
 
   var CHIP_STYLE =
-    'all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;margin-left:2px;' +
+    'all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:5px;margin-left:2px;' +
     'padding:2px 8px;border-radius:8px;font-size:13px;cursor:pointer;max-width:170px;' +
-    'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s;';
+    'white-space:nowrap;overflow:hidden;transition:background .15s;';
+
+  // Line icons that inherit the surrounding text colour, so they sit with Open
+  // WebUI's own controls instead of dropping a coloured emoji into the row.
+  var svg = function (body) {
+    return (
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.75" stroke-linecap="round" ' +
+      'stroke-linejoin="round" style="width:14px;height:14px;display:block;">' +
+      body +
+      '</svg>'
+    );
+  };
+  var ICON_FOLDER = svg('<path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.6.8l.9 1.2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>');
+  var ICON_CLOUD = svg('<path d="M7 18a4 4 0 0 1-.4-8 6 6 0 0 1 11.6 1.5A3.5 3.5 0 0 1 17.5 18z"/>');
+  var ICON_EMPTY = svg('<path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.6.8l.9 1.2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke-dasharray="3 2"/>');
 
   // Writes only what actually differs. The observer below reacts to DOM
   // changes, so an unconditional write here would retrigger itself forever.
   var render = function () {
-    hideConnectorRows();
+    tidyOpenWebUIChrome();
     var row = findRow();
     if (!row) return;
     if (!chip || !chip.isConnected) {
@@ -328,14 +455,30 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       chip.onclick = function (event) { event.preventDefault(); event.stopPropagation(); openPanel(); };
       chip.onmouseenter = function () { chip.style.background = 'rgba(127,127,127,.14)'; };
       chip.onmouseleave = function () { chip.style.background = 'transparent'; };
+      chipIcon = document.createElement('span');
+      chipIcon.style.cssText = 'display:inline-flex;flex:0 0 auto;';
+      chipLabel = document.createElement('span');
+      chipLabel.style.cssText = 'overflow:hidden;text-overflow:ellipsis;';
+      chip.appendChild(chipIcon);
+      chip.appendChild(chipLabel);
       row.appendChild(chip);
     }
+    markTerminalMenu();
+    setMenuHidden(!remoteControlBroken);
+
     var s = selection();
-    var text = (s && s.mode === 'cloud' ? '☁ ' : s ? '📁 ' : '⌁ ') + label();
-    if (chip.textContent !== text) chip.textContent = text;
-    var title = s
-      ? t('Arbeitsbereich dieses Chats ändern', 'Change this conversation’s workspace')
-      : t('Arbeitsbereich für diesen Chat wählen', 'Choose a workspace for this conversation');
+    var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
+    if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
+    var text = label();
+    if (chipLabel.textContent !== text) chipLabel.textContent = text;
+    var title = remoteControlBroken
+      ? t(
+          'Auswahl konnte nicht auf Open WebUI übertragen werden — benutze das Wolken-Menü daneben',
+          'The selection could not be applied to Open WebUI — use the cloud menu next to this'
+        )
+      : s
+        ? t('Arbeitsbereich dieses Chats ändern', 'Change this conversation’s workspace')
+        : t('Arbeitsbereich für diesen Chat wählen', 'Choose a workspace for this conversation');
     if (chip.title !== title) chip.title = title;
     var opacity = s ? '0.85' : '0.5';
     if (chip.style.opacity !== opacity) chip.style.opacity = opacity;

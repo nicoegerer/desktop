@@ -15,6 +15,7 @@ import {
   delay,
   getPortFromService,
   isHealthCheckReady,
+  isManagedMcpoOnPort,
   isPortInUse,
   waitForPortToClose
 } from './network'
@@ -239,9 +240,26 @@ export class ManagedServicesManager {
         : false
       if (ready) {
         if (runtime.definition.type === 'mcpo') {
+          // An mcpo that answers with our own generated key can only be an
+          // instance this app started and lost track of — after a crash or a
+          // forced quit. Adopt it instead of refusing to start.
+          const ownKey = this.registry.getApiKey(runtime.definition.id)
+          if (
+            runtime.definition.healthCheckUrl &&
+            ownKey &&
+            (await isManagedMcpoOnPort(runtime.definition.healthCheckUrl, ownKey))
+          ) {
+            runtime.ownsProcess = false
+            runtime.logs.add(
+              `Adopted the mcpo instance already running on port ${port}; its bearer key matches this connector`
+            )
+            this.setStatus(runtime, 'running')
+            return this.snapshot(runtime)
+          }
+
           return this.fail(
             runtime,
-            `Port ${port} already hosts another process. Managed MCP connectors are not adopted because the API key cannot be verified. Stop the existing process, choose another port, or add it as a remote endpoint with its current bearer token.`,
+            `Port ${port} already hosts another process that does not accept this connector's bearer key. Stop that process, choose another port, or add it as a remote endpoint with its own token.`,
             false
           )
         }
