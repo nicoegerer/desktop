@@ -7,6 +7,8 @@
   import GetStartedModal from './GetStartedModal.svelte'
   import AddConnectionModal from './AddConnectionModal.svelte'
   import landingVideo from '../../../../assets/landing.mp4'
+  import { buildWorkspaceChipScript } from '../../../guest/workspace-chip'
+  import { connectorToolId } from '../../../../../../shared/services/tool-servers'
 
   interface Props {
     sidebarOpen: boolean
@@ -78,6 +80,31 @@
   // Content preload path for webview bridge
   let contentPreloadPath: string = $state('')
 
+  /**
+   * Add the workspace chip to the embedded Open WebUI page and hide the
+   * connector rows from its tools menu.
+   *
+   * This runs in the guest's main world, which is the only place that can see
+   * the page's own `fetch`. It is deliberately best-effort: a failure leaves
+   * Open WebUI exactly as it was.
+   */
+  const injectWorkspaceChip = async (wv: any): Promise<void> => {
+    try {
+      const targets = await window.electronAPI.getManagedServiceToolTargets()
+      const active = targets.filter((target) => target.enabled)
+      await wv.executeJavaScript(
+        buildWorkspaceChipScript({
+          alwaysOnToolIds: active.map(connectorToolId),
+          hiddenToolNames: active.map((target) => target.name),
+          german:
+            typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('de')
+        })
+      )
+    } catch (cause) {
+      console.warn('Workspace chip injection skipped:', cause)
+    }
+  }
+
   // Server is starting up (local)
   const serverStarting = $derived(
     localInstalled && (
@@ -141,6 +168,9 @@
         wv.addEventListener('did-stop-loading', () => {
           webviewLoading.set(connId, false)
           webviewLoading = new Map(webviewLoading)
+          // The workspace chip belongs to the bundled Open WebUI only; a remote
+          // server has neither our terminals nor our connectors.
+          if (connId === 'local') void injectWorkspaceChip(wv)
         })
 
         // Track load failures so we can show an error overlay

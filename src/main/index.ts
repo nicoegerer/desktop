@@ -189,8 +189,6 @@ let SERVER_STATUS: string | null = null
 let SERVER_REACHABLE = false
 let SERVER_PID: number | null = null
 let AUTH_TOKEN: string | null = null
-// Mirrors workspaces.cloud so the sync context can read it without awaiting.
-let CLOUD_WORKSPACE: CloudWorkspace | null = null
 let voiceInputRecording = false
 
 // ─── Global Shortcuts ───────────────────────────────────
@@ -1267,11 +1265,8 @@ if (!gotTheLock) {
           : null,
       resolveToken: () => AUTH_TOKEN,
       listToolTargets: () => getManagedServicesManager()?.getToolTargets() ?? [],
-      resolveCloudWorkspace: () => CLOUD_WORKSPACE,
       onResult: (result) => sendToRenderer('open-webui:sync', result)
     })
-
-    CLOUD_WORKSPACE = await getCloudWorkspace()
 
     void initializeManagedServices().then(() => {
       getManagedServicesManager()?.onChange(() => scheduleOpenWebUISync())
@@ -2013,50 +2008,78 @@ if (!gotTheLock) {
     ipcMain.handle('open-terminal:status', () => isPackageInstalled('open-terminal'))
     ipcMain.handle('open-terminal:pty:connect', () => connectOpenTerminalPtyPort())
 
-    // ─── Workspace terminals ──────────────────────────
-    // One Open Terminal per workspace, so a chat can pick its working folder.
-    ipcMain.handle('workspace:terminals', () => listWorkspaceTerminals())
-
-    ipcMain.handle('workspace:open', async (_event, workspacePath: string) => {
-      if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
-        throw new Error('A workspace folder is required')
-      }
-      sendToRenderer('status:workspace', `Starting Open Terminal in ${workspacePath}…`)
-      const terminal = await startWorkspaceTerminal(workspacePath, (status) =>
-        sendToRenderer('status:workspace', status)
-      )
-      await rememberWorkspace(workspacePath)
-      await setWorkspaceActive(workspacePath, true)
-      sendToRenderer('status:open-terminal', 'started')
-      sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
-      sendToRenderer('status:workspace', '')
-
-      // Registering is what makes the workspace selectable in a chat, so the
-      // caller is told whether that actually succeeded.
-      const result = await syncOpenWebUI()
-      if (result.status === 'failed' || result.status === 'skipped') {
-        scheduleOpenWebUISync()
-      }
-      return { terminal, sync: result }
-    })
-
-    ipcMain.handle('workspace:close', async (_event, workspacePath: string) => {
-      if (typeof workspacePath !== 'string') throw new Error('A workspace folder is required')
-      const stopped = await stopWorkspaceTerminal(workspacePath)
-      await setWorkspaceActive(workspacePath, false)
-      sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
-      if (!listWorkspaceTerminals().length) sendToRenderer('status:open-terminal', 'stopped')
-      await syncOpenWebUI()
-      return stopped
-    })
-
-    ipcMain.handle('workspace:activate', (_event, workspacePath: string) => {
-      const changed = setActiveWorkspaceTerminal(String(workspacePath ?? ''))
-      if (changed) sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
-      return changed
-    })
-
     ipcMain.handle('open-webui:sync', () => syncOpenWebUI())
+
+    // ─── Chat workspace chip ──────────────────────────
+    // Serves the script injected into the Open WebUI page. Every handler
+    // answers with {ok} instead of rejecting, so a failure shows up as a
+    // message in the chip rather than an unhandled rejection in the guest.
+    const chipError = (cause: unknown): { ok: false; error: string } => ({
+      ok: false,
+      error: cause instanceof Error ? cause.message : String(cause)
+    })
+
+    ipcMain.handle('workspace:chip:choose-folder', async () => {
+      try {
+        const result = await dialog.showOpenDialog({
+          properties: ['openDirectory', 'createDirectory'],
+          title: 'Choose a workspace folder'
+        })
+        if (result.canceled || !result.filePaths[0]) return { ok: false, error: 'canceled' }
+        const folder = result.filePaths[0]
+        return { ok: true, path: folder, name: path.basename(folder) || folder }
+      } catch (cause) {
+        return chipError(cause)
+      }
+    })
+
+    ipcMain.handle('workspace:chip:recent', async () => {
+      try {
+        return { ok: true, workspaces: await listWorkspaces() }
+      } catch (cause) {
+        return chipError(cause)
+      }
+    })
+
+    ipcMain.handle('workspace:chip:repos', async () => {
+      try {
+        const token = getManagedServicesManager()?.getGithubAccessToken()
+        if (!token) {
+          return {
+            ok: false,
+            error: 'Add the GitHub connector under Settings → Services & Connectors first.'
+          }
+        }
+        return { ok: true, repos: await listGithubRepositories(token) }
+      } catch (cause) {
+        return chipError(cause)
+      }
+    })
+
+    ipcMain.handle('workspace:chip:open', async (_event, workspacePath: string) => {
+      try {
+        if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
+          throw new Error('A workspace folder is required')
+        }
+        const terminal = await startWorkspaceTerminal(workspacePath)
+        await rememberWorkspace(workspacePath)
+        await setWorkspaceActive(workspacePath, true)
+        sendToRenderer('status:open-terminal', 'started')
+        sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
+
+        // The chat can only address the terminal once Open WebUI knows it.
+        const sync = await syncOpenWebUI()
+        if (sync.status === 'failed') {
+          throw new Error('The workspace could not be registered in Open WebUI.')
+        }
+        return {
+          ok: true,
+          terminal: { id: terminal.id, name: path.basename(terminal.cwd) || terminal.cwd }
+        }
+      } catch (cause) {
+        return chipError(cause)
+      }
+    })
 
     // llama.cpp
     ipcMain.handle('llamacpp:setup', async () => {
@@ -2268,26 +2291,6 @@ if (!gotTheLock) {
       }
       return listGithubBranches(token, String(fullName ?? ''))
     })
-
-    // ─── Cloud workspace ──────────────────────────────
-    // No checkout: the model works on the repository through the GitHub
-    // connector, so the choice only has to reach the system prompt.
-    ipcMain.handle('workspace:cloud:get', () => CLOUD_WORKSPACE)
-
-    ipcMain.handle(
-      'workspace:cloud:set',
-      async (_event, workspace: { repoFullName: string; branch: string } | null) => {
-        const next =
-          workspace && workspace.repoFullName && workspace.branch
-            ? { repoFullName: String(workspace.repoFullName), branch: String(workspace.branch) }
-            : null
-        await setCloudWorkspace(next)
-        CLOUD_WORKSPACE = next
-        const sync = await syncOpenWebUI()
-        if (sync.status === 'failed' || sync.status === 'skipped') scheduleOpenWebUISync()
-        return { workspace: next, sync }
-      }
-    )
 
     ipcMain.handle('workspace:github:prepare', async (_event, fullName: string) => {
       const token = getManagedServicesManager()?.getGithubAccessToken()

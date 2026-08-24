@@ -12,7 +12,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "svelte-check": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "npm run typecheck:node && npm run svelte-check",
-    "test:ipc": "node --experimental-strip-types --test tests/ipc-serialization.test.mts tests/tool-servers.test.mts",
+    "test:ipc": "node --experimental-strip-types --test tests/ipc-serialization.test.mts tests/tool-servers.test.mts tests/chat-payload.test.mts tests/workspace-chip.test.mts",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",

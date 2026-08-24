@@ -6,7 +6,6 @@ import {
   mergeDefaultTools,
   mergeTerminalServers,
   mergeToolServers,
-  type CloudWorkspace,
   type TerminalServerConnection,
   type ToolServerConnection
 } from '../../shared/services/tool-servers'
@@ -35,8 +34,6 @@ interface SyncContext {
   /** Admin token relayed from the Open WebUI page, if one was seen. */
   resolveToken: () => string | null
   listToolTargets: () => ManagedServiceToolTarget[]
-  /** The selected cloud repository, or null when no cloud workspace is active. */
-  resolveCloudWorkspace: () => CloudWorkspace | null
   onResult?: (result: OpenWebUISyncResult) => void
 }
 
@@ -114,8 +111,7 @@ const writeConfig = async (
 const syncUserSettings = async (
   baseUrl: string,
   token: string,
-  targets: ManagedServiceToolTarget[],
-  cloudWorkspace: CloudWorkspace | null
+  targets: ManagedServiceToolTarget[]
 ): Promise<boolean | 'failed'> => {
   const response = await electronNet.fetch(`${baseUrl}/api/v1/users/user/settings`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -131,8 +127,11 @@ const syncUserSettings = async (
 
   const currentTools = Array.isArray(ui.tools) ? (ui.tools as string[]) : []
   const nextTools = mergeDefaultTools(currentTools, targets)
+  // The cloud workspace is chosen per conversation and travels in the chat
+  // request, so an account-wide declaration written by an earlier version is
+  // cleaned up here rather than kept in sync.
   const currentSystem = typeof ui.system === 'string' ? ui.system : ''
-  const nextSystem = applyCloudWorkspacePrompt(currentSystem, cloudWorkspace)
+  const nextSystem = applyCloudWorkspacePrompt(currentSystem, null)
 
   if (
     JSON.stringify(currentTools) === JSON.stringify(nextTools) &&
@@ -229,12 +228,7 @@ export const syncOpenWebUI = async (): Promise<OpenWebUISyncResult> => {
 
   // Registering a connector is only half the job: Open WebUI still has to
   // select it for a conversation, which is what the user default does.
-  const settingsWritten = await syncUserSettings(
-    baseUrl,
-    token,
-    toolTargets,
-    context.resolveCloudWorkspace()
-  )
+  const settingsWritten = await syncUserSettings(baseUrl, token, toolTargets)
   if (settingsWritten === 'failed') {
     return { status: 'failed', reason: 'user-settings-write', toolServers: 0, terminals: 0 }
   }
