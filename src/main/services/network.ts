@@ -92,3 +92,55 @@ export const waitForPortToClose = async (port: number, timeoutMs = 5_000): Promi
   }
   return !(await isPortInUse(port))
 }
+
+/**
+ * Decide whether the process already listening on an mcpo port is one of ours.
+ *
+ * mcpo protects its OpenAPI document with the bearer key we generated, so a
+ * document that accepts that key can only be an mcpo started with it — an
+ * instance orphaned by a crash or a forced restart. Adopting it is safe and
+ * beats refusing to start because the port looks busy.
+ */
+export const isManagedMcpoOnPort = (
+  healthCheckUrl: string,
+  apiKey: string,
+  timeoutMs = 2_000
+): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (!apiKey) {
+      resolve(false)
+      return
+    }
+
+    let settled = false
+    const finish = (result: boolean): void => {
+      if (settled) return
+      settled = true
+      resolve(result)
+    }
+
+    try {
+      const url = new URL(healthCheckUrl)
+      url.pathname = '/openapi.json'
+      url.search = ''
+      const client = url.protocol === 'https:' ? https : http
+      const request = client.get(
+        url,
+        { headers: { Authorization: `Bearer ${apiKey}` } },
+        (response) => {
+          request.setTimeout(0)
+          response.on('error', () => finish(false))
+          response.resume()
+          finish(response.statusCode === 200)
+        }
+      )
+      request.setTimeout(timeoutMs)
+      request.once('error', () => finish(false))
+      request.once('timeout', () => {
+        request.destroy()
+        finish(false)
+      })
+    } catch {
+      finish(false)
+    }
+  })

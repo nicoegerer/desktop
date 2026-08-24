@@ -80,6 +80,8 @@ const run = (): Harness => {
     })
   }
 
+  const byId = new Map<string, Record<string, unknown>>()
+
   const element = (): Record<string, unknown> => {
     let text = ''
     const node: Record<string, unknown> = {
@@ -88,7 +90,15 @@ const run = (): Harness => {
       title: '',
       isConnected: true,
       children: [] as unknown[],
-      setAttribute: () => {},
+      classList: { toggle: () => {}, add: () => {}, remove: () => {} },
+      getAttribute: () => null,
+      setAttribute: (name: string, value: string) => {
+        if (name === 'id') byId.set(value, node)
+      },
+      querySelector: () => null,
+      querySelectorAll: () => [] as unknown[],
+      closest: () => null,
+      contains: () => false,
       appendChild: (child: unknown) => {
         renders++
         ;(node.children as unknown[]).push(child)
@@ -97,6 +107,13 @@ const run = (): Harness => {
       removeChild: () => {},
       getBoundingClientRect: () => ({ left: 0, top: 0 })
     }
+    // Elements the script injects must be findable afterwards, or a
+    // create-if-missing helper would recreate them on every pass and the test
+    // would blame the script for the stub's forgetfulness.
+    Object.defineProperty(node, 'id', {
+      get: () => '',
+      set: (value: string) => byId.set(value, node)
+    })
     // Assigning textContent replaces the element's text node, which a
     // childList observer reports — that is what turned an unconditional write
     // into an endless render loop.
@@ -159,11 +176,18 @@ const run = (): Harness => {
   }
 
   const doc: Record<string, unknown> = {
+    head: element(),
+    documentElement: element(),
     body: element(),
     addEventListener: () => {},
     createElement: () => element(),
     getElementById: (id: string) =>
-      id === 'input-menu-button' ? anchor : id === 'integration-menu-button' ? other : null,
+      id === 'input-menu-button'
+        ? anchor
+        : id === 'integration-menu-button'
+          ? other
+          : (byId.get(id) ?? null),
+    querySelector: () => null,
     querySelectorAll: () => [] as unknown[]
   }
 

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.11] - 2026-08-24
+
+### Fixed
+
+- **The chip and Open WebUI's cloud menu were two separate selections.** Which folder a conversation
+  works in lives in a store inside Open WebUI's bundle, and the file browser and terminal panel read
+  it — so the chip could rewrite the chat request but never move what the page displayed. The chip
+  now operates Open WebUI's own terminal menu, making its click the page's click, and that menu is
+  hidden so there is one control. If driving it ever fails the menu is shown again rather than
+  leaving a chip that looks authoritative but selects nothing.
+- **A connector whose port was still held could not start.** An mcpo instance orphaned by a crash or
+  a forced quit kept the port, and startup refused because the key could not be verified. An mcpo
+  that answers with this connector's own generated key can only be ours, so it is adopted instead.
+  This is what left Garmin red.
+- **The tools counter still advertised the connectors.** It is hidden while the only active tools are
+  the desktop's own; adding a tool of your own brings it back, with the connector rows hidden
+  individually.
+
+### Changed
+
+- **The chip uses line icons instead of an emoji.** A folder or cloud outline that takes the
+  surrounding text colour, rather than a yellow glyph that did not belong in the row.
+
 ## [0.0.20-services.10] - 2026-08-24
 
 ### Fixed
