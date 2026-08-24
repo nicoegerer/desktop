@@ -29,6 +29,7 @@
     onAddConnection: () => void
     onSetView: (v: string) => void
     showAddConnectionModal: boolean
+    onWebviewEvent?: (connId: string, payload: { type: string; data?: unknown }) => void
   }
 
   let {
@@ -51,7 +52,8 @@
     onStartInstall,
     onAddConnection,
     onSetView,
-    showAddConnectionModal = $bindable(false)
+    showAddConnectionModal = $bindable(false),
+    onWebviewEvent
   }: Props = $props()
 
   let showGetStartedModal = $state(false)
@@ -217,6 +219,8 @@
           } else if (event.channel === 'webview:event') {
             const payload = event.args?.[0]
             if (!payload?.type) return
+
+            onWebviewEvent?.(connId, payload)
 
             if (payload.type === 'theme:update') {
               const webuiTheme = payload.data?.theme ?? 'system'

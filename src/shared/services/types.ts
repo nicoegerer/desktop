@@ -48,6 +48,28 @@ export interface ManagedServiceIntegration {
   commandPreview: string
 }
 
+/**
+ * A connector reduced to what Open WebUI needs for an entry in
+ * `TOOL_SERVER_CONNECTIONS`. mcpo connectors expose an OpenAPI document,
+ * remote endpoints are registered as Streamable HTTP MCP servers.
+ */
+export interface ManagedServiceToolTarget {
+  id: string
+  name: string
+  kind: 'openapi' | 'mcp'
+  url: string
+  path: string
+  key: string
+  enabled: boolean
+  ready: boolean
+}
+
+export interface ToolServerSyncResult {
+  status: 'synced' | 'unchanged' | 'skipped' | 'failed'
+  reason?: string
+  count: number
+}
+
 export interface ManagedServiceImportPreview {
   token: string
   schemaVersion: number
@@ -70,6 +92,7 @@ export type ManagedServicesRequest =
   | { action: 'stop'; id: string }
   | { action: 'logs'; id: string }
   | { action: 'integration'; id: string }
+  | { action: 'tool-targets' }
   | { action: 'suggest-port' }
   | { action: 'export' }
   | { action: 'import-preview' }

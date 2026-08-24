@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Connectors reach the chat automatically.** Every MCP and remote connector in the registry is now
+  written into Open WebUI's tool-server configuration when it changes and when a connection opens.
+  mcpo connectors register as OpenAPI servers, remote endpoints as MCP (Streamable HTTP) servers with
+  their bearer token. Connections added by hand in Open WebUI are left untouched, and a connector
+  removed from the registry is removed there as well. Registration requires an Open WebUI admin
+  session and waits for sign-in.
+- **GitHub repositories as workspaces.** The workspace picker has a GitHub tab that lists the
+  repositories reachable with the configured GitHub MCP token. Selecting one clones it into the
+  workspace root or fast-forwards an existing clone, then points Open Terminal at it, so a chat can
+  work in a repository the same way it works in a local folder. A checkout with uncommitted changes
+  is opened as-is instead of being pulled. The token is passed to `git` through the environment and
+  never appears in process arguments.
+- **Recent workspaces.** The picker keeps the last workspaces and marks the active one, so switching
+  between a local project and a repository no longer means browsing the file system again.
 - **Agentic Local Workspaces.** A guided Services card lets users choose a project folder, start Open
   Terminal there, and synchronize it with the bundled local Open WebUI so tool-capable models can
   edit files, use Git, and run builds and tests.
@@ -28,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Connectors started but stayed invisible to the chat.** Starting Garmin MCP or GitHub MCP only
+  launched the process; Open WebUI's tool-server list stayed empty, so no chat could call them. The
+  registry now registers them itself.
+- **GitHub token was labelled optional but required.** The bearer field of the hosted GitHub MCP
+  preset is now labelled as a required Personal Access Token, matching the validation that already
+  rejected an empty value.
 - **Service editor could not save.** Svelte state proxies are converted to plain IPC values before
   Electron receives them, fixing `An object could not be cloned.` for Garmin MCP, GitHub MCP, and
   other connectors.

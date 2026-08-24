@@ -180,6 +180,18 @@ const api = {
   validateUrl: (url: string) => ipcRenderer.invoke('validate:url', url),
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
 
+  // Workspaces
+  listWorkspaces: () => ipcRenderer.invoke('workspace:list'),
+  getWorkspacesRoot: () => ipcRenderer.invoke('workspace:root'),
+  rememberWorkspace: (workspacePath: string, repoFullName?: string) =>
+    ipcRenderer.invoke('workspace:remember', workspacePath, repoFullName),
+  forgetWorkspace: (workspacePath: string) =>
+    ipcRenderer.invoke('workspace:forget', workspacePath),
+  getGithubWorkspaceStatus: () => ipcRenderer.invoke('workspace:github:status'),
+  listGithubRepositories: () => ipcRenderer.invoke('workspace:github:repos'),
+  prepareGithubWorkspace: (fullName: string) =>
+    ipcRenderer.invoke('workspace:github:prepare', fullName),
+
   // Updater
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),

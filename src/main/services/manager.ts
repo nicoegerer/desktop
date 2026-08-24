@@ -8,7 +8,8 @@ import {
   type ManagedServiceDefinition,
   type ManagedServiceIntegration,
   type ManagedServiceSnapshot,
-  type ManagedServiceStatus
+  type ManagedServiceStatus,
+  type ManagedServiceToolTarget
 } from '../../shared/services/types'
 import {
   delay,
@@ -97,6 +98,69 @@ export class ManagedServicesManager {
         .commandPreview(runtime.definition)
         .replace(MCPO_API_KEY_PLACEHOLDER, bearerKey)
     }
+  }
+
+  /**
+   * Connectors that Open WebUI can call as tool servers. A generic local
+   * process is excluded because it has no advertised tool contract.
+   *
+   * Stopped-but-enabled connectors stay in the list so their entry survives a
+   * restart; only the desktop toggle decides whether Open WebUI keeps them
+   * enabled.
+   */
+  getToolTargets(): ManagedServiceToolTarget[] {
+    const targets: ManagedServiceToolTarget[] = []
+
+    for (const runtime of this.runtimes.values()) {
+      const definition = runtime.definition
+
+      if (definition.type === 'mcpo' && definition.mcpo) {
+        const key = this.registry.getApiKey(definition.id)
+        if (!key) continue
+        targets.push({
+          id: definition.id,
+          name: definition.name,
+          kind: 'openapi',
+          url: `http://127.0.0.1:${definition.mcpo.port}`,
+          path: 'openapi.json',
+          key,
+          enabled: definition.enabled,
+          ready: runtime.status === 'running'
+        })
+        continue
+      }
+
+      if (definition.type === 'remote' && definition.remote) {
+        targets.push({
+          id: definition.id,
+          name: definition.name,
+          kind: 'mcp',
+          url: definition.remote.url,
+          path: '',
+          key: this.registry.getAccessToken(definition.id) ?? '',
+          enabled: definition.enabled,
+          ready: runtime.status === 'running'
+        })
+      }
+    }
+
+    return targets
+  }
+
+  /**
+   * Access token of the connected GitHub MCP endpoint, if one is configured.
+   * Lets the workspace picker list and clone repositories without asking for a
+   * second credential.
+   */
+  getGithubAccessToken(): string | null {
+    for (const runtime of this.runtimes.values()) {
+      const definition = runtime.definition
+      if (definition.type !== 'remote' || !definition.remote) continue
+      if (!/(^|\.)github(copilot)?\.com/i.test(new URL(definition.remote.url).hostname)) continue
+      const token = this.registry.getAccessToken(definition.id)
+      if (token) return token
+    }
+    return null
   }
 
   async upsert(value: unknown): Promise<ManagedServiceSnapshot> {
