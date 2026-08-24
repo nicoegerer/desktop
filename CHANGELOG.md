@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.14] - 2026-08-24
+
+### Added
+
+- **A cloud workspace shows its files.** The selected repository is mounted read-only and registered
+  as a terminal server, so Open WebUI's file panel lists its tree and opens files just as it does for
+  a local folder — still without a checkout. The mount serves the browsing subset of Open Terminal's
+  file API against the GitHub contents API; one loopback server hosts every repository under its own
+  path prefix. Anything that would change the repository is refused, because writing belongs to the
+  GitHub connector, which commits properly.
+
+### Fixed
+
+- **The workspace was forgotten the moment it was used.** A conversation has no id until its first
+  message, so the choice was stored under a draft slot; when Open WebUI then navigated to the new
+  conversation the chip looked under its id, found nothing, and fell back to "Arbeitsbereich". The
+  draft is now handed over to the conversation that grew out of it.
+
 ## [0.0.20-services.13] - 2026-08-24
 
 ### Fixed

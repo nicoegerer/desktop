@@ -41,11 +41,23 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var writeAll = function (map) {
     try { localStorage.setItem(KEY, JSON.stringify(map)); } catch (e) { /* quota */ }
   };
-  // A conversation has no id until its first reply, so drafts share one slot
-  // and inherit it when the chat is saved.
+  // A conversation has no id until its first reply, so drafts share one slot.
   var chatKey = function () {
     var m = /\\/c\\/([^/?#]+)/.exec(location.pathname);
     return m ? m[1] : 'draft';
+  };
+
+  // Sending the first message turns the draft into a real conversation and the
+  // URL gains its id. Without carrying the choice over, the workspace picked
+  // before sending would be forgotten the moment it was used.
+  var adoptDraft = function () {
+    var key = chatKey();
+    if (key === 'draft') return;
+    var all = readAll();
+    if (all[key] || !all.draft) return;
+    all[key] = all.draft;
+    delete all.draft;
+    writeAll(all);
   };
   var selection = function () { return readAll()[chatKey()] || null; };
 
@@ -60,7 +72,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     for (var key in all) {
       if (!Object.prototype.hasOwnProperty.call(all, key)) continue;
       var entry = all[key];
-      if (entry && entry.mode === 'local' && entry.terminalId && ids.indexOf(entry.terminalId) === -1) {
+      if (entry && entry.terminalId && ids.indexOf(entry.terminalId) === -1) {
         ids.push(entry.terminalId);
       }
     }
@@ -270,7 +282,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   };
 
   var applySelection = function (selected, done) {
-    driveSelection(selected && selected.mode === 'local' ? selected.label : null, function (ok) {
+    driveSelection(selected && selected.label ? selected.label : null, function (ok) {
       remoteControlBroken = !ok;
       setMenuHidden(!remoteControlBroken);
       scheduleRender();
@@ -404,9 +416,29 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
             .slice(0, 60)
             .forEach(function (r) {
               results.appendChild(button(r.fullName, function () {
-                select({ mode: 'cloud', repoFullName: r.fullName, branch: r.defaultBranch });
-                closePanel();
-              }, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName));
+                // Mounting the repository read-only gives the file panel
+                // something to show; writing stays with the GitHub tools.
+                busy = true; note = ''; renderPanel();
+                ask('workspaceMountRepo', {
+                  repoFullName: r.fullName,
+                  branch: r.defaultBranch
+                }).then(function (result) {
+                  busy = false;
+                  if (!result || !result.ok) {
+                    note = (result && result.error) ||
+                      t('Repository konnte nicht geöffnet werden.', 'Could not open the repository.');
+                    renderPanel();
+                    return;
+                  }
+                  select({
+                    mode: 'cloud',
+                    repoFullName: r.fullName,
+                    branch: r.defaultBranch,
+                    terminalId: result.terminal.id,
+                    label: result.terminal.name
+                  });
+                });
+              }, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName, ICON_CLOUD));
             });
         };
         search.oninput = paint;
@@ -490,6 +522,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   // Writes only what actually differs. The observer below reacts to DOM
   // changes, so an unconditional write here would retrigger itself forever.
   var render = function () {
+    // The chat id only appears after a pushState, which raises no event, so the
+    // handover is checked whenever the page changes.
+    adoptDraft();
     tidyOpenWebUIChrome();
     var row = findRow();
     if (!row) return;

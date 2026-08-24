@@ -83,12 +83,31 @@ Several folders can be open at once — one terminal each — and they are reope
 ### Cloud
 
 Pick **Cloud** for a list of the repositories the GitHub connector's token can reach. Selecting one
-makes it the workspace for that conversation **without a checkout**: no clone, no terminal. The
-request carries a system message naming the repository and branch and telling the model to work
-through the GitHub tools and commit to that branch, so it does not look for files on disk.
+makes it the workspace for that conversation **without a checkout**: nothing is cloned.
 
-Switching workspace mid-conversation replaces that instruction rather than stacking a second one, and
-switching back to a local folder removes it.
+The repository is mounted read-only and registered as a terminal server, so Open WebUI's file panel
+shows its tree and file contents just as it does for a local folder. The mount serves the browsing
+subset of Open Terminal's file API — `/files/list`, `/files/read`, `/files/cwd`, `/health`, `/info`,
+`/api/config` — against the GitHub contents API, on one loopback server that hosts every repository
+under its own path prefix. Anything that would change the repository answers `405`.
+
+Writing stays with the GitHub connector: the chat request carries a system message naming the
+repository and branch and telling the model to commit through the GitHub tools, and it carries no
+`terminal_id`, so the model is never offered a shell it does not have.
+
+Switching workspace mid-conversation replaces that instruction rather than stacking a second one,
+and switching back to a local folder removes it.
+
+### Lifetime
+
+A workspace is started when a conversation asks for one, never on launch. Open Terminal runs with
+the folder as its working directory, so a folder left open would keep a handle on it and could not be
+deleted or moved. The chat reports which workspaces its conversations still point at — that set lives
+per conversation in the page's own storage — and the desktop releases the folders and repository
+mounts nobody references any more.
+
+A workspace picked before the first message is carried over when the conversation gets its id, so it
+is not lost the moment it is used.
 
 ## GitHub MCP preset
 

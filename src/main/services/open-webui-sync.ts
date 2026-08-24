@@ -14,6 +14,7 @@ import type {
   OpenWebUISyncResult
 } from '../../shared/services/types'
 import { listWorkspaceTerminals } from '../utils/open-terminal'
+import { listGithubMounts } from './github-fs'
 
 /**
  * The desktop registry owns part of Open WebUI's configuration: connectors
@@ -171,9 +172,25 @@ export const syncOpenWebUI = async (): Promise<OpenWebUISyncResult> => {
   }
 
   const toolTargets = context.listToolTargets()
-  const terminals = listWorkspaceTerminals().filter(
-    (terminal) => terminal.status === 'started' && terminal.url
-  )
+  // A local folder and a mounted GitHub repository are both terminal servers as
+  // far as Open WebUI is concerned; only what backs them differs.
+  const terminals = [
+    ...listWorkspaceTerminals()
+      .filter((terminal) => terminal.status === 'started' && terminal.url)
+      .map((terminal) => ({
+        id: terminal.id,
+        cwd: terminal.cwd,
+        url: terminal.url,
+        apiKey: terminal.apiKey
+      })),
+    ...listGithubMounts().map((mount) => ({
+      id: mount.id,
+      cwd: mount.name,
+      url: mount.url,
+      apiKey: mount.apiKey,
+      name: mount.name
+    }))
+  ]
 
   const currentTools = await readConfig(baseUrl, token, 'tool_servers', 'TOOL_SERVER_CONNECTIONS')
   if (currentTools === 'forbidden') {
