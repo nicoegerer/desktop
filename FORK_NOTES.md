@@ -1,6 +1,4 @@
-<!-- Test von OpenWeb UI -->
-
-# Test Überschrift
+# Managed Services fork notes
 
 This fork adds a public, provider-neutral services and connectors layer to Open WebUI Desktop.
 It does not ship personal service definitions, credentials, or provider accounts.
