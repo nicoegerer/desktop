@@ -848,6 +848,8 @@ export interface AppConfig {
   workspaces: {
     root: string
     recent: Array<{ path: string; name: string; repoFullName?: string; lastUsedAt: number }>
+    /** Workspaces whose terminal is reopened on the next launch. */
+    active: string[]
   }
   envVars: Record<string, string>
   showSidebar: boolean
@@ -888,7 +890,8 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   workspaces: {
     root: '',
-    recent: []
+    recent: [],
+    active: []
   },
   envVars: {},
   showSidebar: false,

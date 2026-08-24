@@ -13,11 +13,14 @@
 
   interface Props {
     onClose: () => void
+    /** Opens straight on a tab, e.g. when the workspace picker sends the user
+     *  to the GitHub connector setup. */
+    initialTab?: string
   }
 
-  let { onClose }: Props = $props()
+  let { onClose, initialTab = 'general' }: Props = $props()
 
-  let settingsTab = $state('general')
+  let settingsTab = $state(initialTab)
 
   const tabs = [
     {

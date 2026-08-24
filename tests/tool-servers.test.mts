@@ -3,8 +3,11 @@ import { test } from 'node:test'
 
 import {
   DESKTOP_TOOL_PREFIX,
+  mergeTerminalServers,
   mergeToolServers,
-  type ToolServerConnection
+  type TerminalServerConnection,
+  type ToolServerConnection,
+  type WorkspaceTerminalTarget
 } from '../src/shared/services/tool-servers.ts'
 import type { ManagedServiceToolTarget } from '../src/shared/services/types.ts'
 
@@ -120,6 +123,127 @@ test('an unchanged registry produces a byte-identical list so no write happens',
   const targets = [target({ id: 'garmin' }), target({ id: 'github-mcp', kind: 'mcp', path: '' })]
   const first = mergeToolServers([handAdded], targets)
   const second = mergeToolServers(first, targets)
+
+  assert.equal(JSON.stringify(first), JSON.stringify(second))
+})
+
+// ─── Workspace terminals ────────────────────────────────
+
+const workspace = (
+  overrides: Partial<WorkspaceTerminalTarget> & Pick<WorkspaceTerminalTarget, 'id' | 'cwd'>
+): WorkspaceTerminalTarget => ({
+  url: 'http://127.0.0.1:39284',
+  apiKey: 'terminal-key',
+  ...overrides
+})
+
+test('a workspace terminal is registered with an id so the chat can select it', () => {
+  const merged = mergeTerminalServers(
+    [],
+    [workspace({ id: 'desktop-ws-abc123', cwd: 'C:\\Users\\me\\projects\\test1' })]
+  )
+
+  assert.equal(merged.length, 1)
+  // Open WebUI hides system terminals whose id is falsy, so this is the whole
+  // reason a workspace shows up in the cloud menu at all.
+  assert.equal(merged[0].id, 'desktop-ws-abc123')
+  assert.equal(merged[0].name, 'test1')
+  assert.equal(merged[0].enabled, true)
+  assert.equal(merged[0].path, '/openapi.json')
+  assert.equal(merged[0].auth_type, 'bearer')
+})
+
+test('several workspaces are registered side by side', () => {
+  const merged = mergeTerminalServers(
+    [],
+    [
+      workspace({ id: 'desktop-ws-1', cwd: '/home/me/test1', url: 'http://127.0.0.1:39284' }),
+      workspace({ id: 'desktop-ws-2', cwd: '/home/me/other', url: 'http://127.0.0.1:39285' })
+    ]
+  )
+
+  assert.deepEqual(
+    merged.map((entry) => [entry.id, entry.name, entry.url]),
+    [
+      ['desktop-ws-1', 'test1', 'http://127.0.0.1:39284'],
+      ['desktop-ws-2', 'other', 'http://127.0.0.1:39285']
+    ]
+  )
+})
+
+test('the id-less loopback terminal written by earlier versions is cleaned up', () => {
+  const legacy: TerminalServerConnection = {
+    id: '',
+    name: 'Local Open Terminal',
+    enabled: true,
+    url: 'http://127.0.0.1:39284',
+    path: '/openapi.json',
+    key: 'stale',
+    auth_type: 'bearer'
+  }
+
+  const merged = mergeTerminalServers(
+    [legacy],
+    [workspace({ id: 'desktop-ws-1', cwd: '/home/me/test1' })]
+  )
+
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].id, 'desktop-ws-1')
+})
+
+test('a remote terminal added by hand is kept even without an id', () => {
+  const remote: TerminalServerConnection = {
+    id: '',
+    name: 'Build box',
+    url: 'https://build.example.com',
+    path: '/openapi.json'
+  }
+
+  const merged = mergeTerminalServers([remote], [])
+
+  assert.deepEqual(merged, [remote])
+})
+
+test('closing a workspace removes its terminal from Open WebUI', () => {
+  const existing = mergeTerminalServers(
+    [],
+    [
+      workspace({ id: 'desktop-ws-1', cwd: '/home/me/test1' }),
+      workspace({ id: 'desktop-ws-2', cwd: '/home/me/other' })
+    ]
+  )
+  const merged = mergeTerminalServers(existing, [
+    workspace({ id: 'desktop-ws-2', cwd: '/home/me/other' })
+  ])
+
+  assert.deepEqual(
+    merged.map((entry) => entry.id),
+    ['desktop-ws-2']
+  )
+})
+
+test('a restarted workspace picks up its new port and key', () => {
+  const existing = mergeTerminalServers(
+    [],
+    [workspace({ id: 'desktop-ws-1', cwd: '/home/me/test1' })]
+  )
+  const merged = mergeTerminalServers(existing, [
+    workspace({
+      id: 'desktop-ws-1',
+      cwd: '/home/me/test1',
+      url: 'http://127.0.0.1:39290',
+      apiKey: 'rotated'
+    })
+  ])
+
+  assert.equal(merged[0].url, 'http://127.0.0.1:39290')
+  assert.equal(merged[0].key, 'rotated')
+})
+
+test('an unchanged workspace set produces a byte-identical list', () => {
+  const terminals = [workspace({ id: 'desktop-ws-1', cwd: '/home/me/test1' })]
+  const first = mergeTerminalServers([], terminals)
+  const second = mergeTerminalServers(first, terminals)
 
   assert.equal(JSON.stringify(first), JSON.stringify(second))
 })

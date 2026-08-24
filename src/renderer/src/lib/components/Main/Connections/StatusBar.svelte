@@ -18,6 +18,7 @@
     activeLog: string | null
     activeManagedServiceId: string | null
     workspacePath: string
+    workspaceCount: number
     workspaceBusy: boolean
     onSelectLog: (log: string) => void
     onSelectManagedService: (service: ManagedServiceSnapshot) => void
@@ -38,6 +39,7 @@
     activeLog,
     activeManagedServiceId,
     workspacePath,
+    workspaceCount,
     workspaceBusy,
     onSelectLog,
     onSelectManagedService,
@@ -213,22 +215,28 @@
 
   <div class="w-px h-3 bg-black/[0.08] dark:bg-white/[0.08] mx-0.5"></div>
 
-  <!-- Workspace selection belongs to the persistent chat chrome, not connector settings. -->
+  <!-- Opens the workspace manager. Which workspace a conversation uses is
+       chosen per chat through Open WebUI's cloud menu, not here. -->
   <button
-    class="flex max-w-[260px] items-center gap-1.5 rounded-md border-none bg-transparent px-2 py-0.5 text-[11px] text-[#1d1d1f] transition-all hover:bg-black/[0.04] dark:text-[#fafafa] dark:hover:bg-white/[0.06] {workspacePath
+    class="flex max-w-[260px] items-center gap-1.5 rounded-md border-none bg-transparent px-2 py-0.5 text-[11px] text-[#1d1d1f] transition-all hover:bg-black/[0.04] dark:text-[#fafafa] dark:hover:bg-white/[0.06] {workspaceCount
       ? 'opacity-70 hover:opacity-95'
       : 'opacity-40 hover:opacity-75'} disabled:cursor-wait disabled:opacity-30"
     disabled={workspaceBusy}
     onclick={onChooseWorkspace}
-    use:tooltip={workspacePath
-      ? `${l('Aktiver Coding-Arbeitsbereich', 'Active coding workspace')}: ${workspacePath}`
-      : l('Coding-Arbeitsbereich für den Chat auswählen', 'Choose a coding workspace for chat')}
+    use:tooltip={workspaceCount
+      ? l(
+          `${workspaceCount} Arbeitsbereich(e) geöffnet — im Chat über das Wolken-Symbol auswählen`,
+          `${workspaceCount} workspace(s) open — pick one from the cloud icon in chat`
+        )
+      : l('Arbeitsbereiche für Chats öffnen', 'Open workspaces for your chats')}
   >
     <span aria-hidden="true">{workspaceBusy ? '…' : '⌁'}</span>
     <span class="truncate">
-      {workspaceName
-        ? `${l('Arbeitsbereich', 'Workspace')}: ${workspaceName}`
-        : l('Arbeitsbereich wählen', 'Choose workspace')}
+      {workspaceCount === 0
+        ? l('Arbeitsbereiche', 'Workspaces')
+        : workspaceCount === 1 && workspaceName
+          ? `${l('Arbeitsbereich', 'Workspace')}: ${workspaceName}`
+          : `${l('Arbeitsbereiche', 'Workspaces')}: ${workspaceCount}`}
     </span>
   </button>
 

@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.7] - 2026-08-24
+
+### Changed
+
+- **One Open Terminal per workspace.** Open WebUI selects a terminal per conversation, so a single
+  shared instance forced every chat into the same folder. Each open workspace now runs its own
+  terminal and is registered under its folder name, which makes the working directory a per-chat
+  choice made from the cloud icon rather than a global desktop setting. Open workspaces are restored
+  on the next launch.
+- **Workspace manager instead of a single picker.** The status-bar button opens a manager that shows
+  which workspaces are open, opens or closes each one, and reports how many are active.
+- **GitHub setup is reachable where it is needed.** The GitHub tab of the workspace manager offers
+  **Connect GitHub**, which jumps straight to the connector setup instead of describing where to find
+  it.
+
+### Fixed
+
+- **Connectors and workspaces never reached the chat.** Registration was pushed into the embedded
+  page and silently did nothing whenever it ran before a webview existed — the normal case on
+  startup — so `TOOL_SERVER_CONNECTIONS` stayed empty and Garmin MCP and GitHub MCP were invisible in
+  every conversation. The main process now writes the configuration through Open WebUI's admin API
+  and retries with backoff while the server is booting or nobody is signed in.
+- **Empty cloud menu in the message box.** Workspaces were stored without an id, and Open WebUI hides
+  system terminals whose id is empty, so the menu opened as a thin empty strip. Terminals are now
+  registered with a stable id, and the id-less entries written by earlier versions are cleaned up.
+- **Registrations were invisible until a restart.** Open WebUI reads its tool and terminal lists once
+  while the page loads, so the embedded page is reloaded when a registration actually changed
+  something.
+
 ## [0.0.20-services.6] - 2026-08-24
 
 ### Added

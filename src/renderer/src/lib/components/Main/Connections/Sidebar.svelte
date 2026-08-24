@@ -15,7 +15,7 @@
     onConnect: (id: string) => void
     onDisconnect: () => void
     onAddView: () => void
-    onOpenSettings: () => void
+    onOpenSettings: (tab?: string) => void
     onRename: (id: string, name: string) => void
     onRemove: (id: string) => void
     openGithub: () => void

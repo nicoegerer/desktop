@@ -50,7 +50,14 @@ export class ManagedServicesManager {
   private quitComplete = false
   private quitPromise: Promise<void> | null = null
 
+  private changeListener: (() => void) | null = null
+
   constructor(readonly registry: ManagedServicesRegistry) {}
+
+  /** Notified whenever a definition or a runtime status changes. */
+  onChange(listener: () => void): void {
+    this.changeListener = listener
+  }
 
   async initialize(): Promise<void> {
     await this.registry.load()
@@ -546,9 +553,11 @@ export class ManagedServicesManager {
 
   private emitStatus(runtime: ServiceRuntime): void {
     broadcast('managed-service:status', this.snapshot(runtime))
+    this.changeListener?.()
   }
 
   private emitRegistryChanged(): void {
     broadcast('managed-services:changed', this.list())
+    this.changeListener?.()
   }
 }
