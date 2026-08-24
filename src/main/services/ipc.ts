@@ -70,6 +70,8 @@ export const registerManagedServicesIpc = (
         return manager.getLogs(requireId(request))
       case 'integration':
         return manager.getIntegration(requireId(request))
+      case 'tool-targets':
+        return manager.getToolTargets()
       case 'suggest-port':
         return manager.suggestPort()
       case 'export': {

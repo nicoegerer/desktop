@@ -846,7 +846,12 @@
             </span>
           </label>
           <label class="col-span-2 text-[11px] opacity-55"
-            >{l('Bearer-Token (optional, verschlüsselt)', 'Bearer token (optional, encrypted)')}
+            >{draft.remote.url.includes('api.githubcopilot.com/mcp')
+              ? l(
+                  'Personal Access Token (erforderlich, verschlüsselt)',
+                  'Personal Access Token (required, encrypted)'
+                )
+              : l('Bearer-Token (optional, verschlüsselt)', 'Bearer token (optional, encrypted)')}
             <input
               type="password"
               autocomplete="off"

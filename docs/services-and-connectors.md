@@ -19,19 +19,51 @@ Open **Settings → Services & Connectors → Add** and choose one of these adap
 Click a service in the bottom status bar to open its logs in the same resizable panel used by Open
 WebUI, Open Terminal, and llama.cpp. Right-click a running local service to stop it.
 
+## Chat access to a connector
+
+Starting a connector only launches the process. The bundled Open WebUI also has to know the
+endpoint, so the desktop registry writes every MCP and remote connector into Open WebUI's
+`TOOL_SERVER_CONNECTIONS` whenever the registry changes and whenever a connection opens. mcpo
+connectors are registered as **OpenAPI** servers pointing at `openapi.json`; remote endpoints are
+registered as **MCP (Streamable HTTP)** servers with their bearer token.
+
+Registered entries carry the id `desktop-<service-id>`. Connections added by hand in Open WebUI are
+never touched, and a connector removed from the desktop registry is removed from Open WebUI on the
+next sync. Disabling a connector clears its `enable` flag instead of deleting the entry, so bearer
+keys and filters survive a restart.
+
+Two conditions apply:
+
+- The Open WebUI account must be an **admin**; tool-server configuration is an admin API. A
+  non-admin session is reported in the desktop status toast and nothing is written.
+- The sync waits for sign-in. If the app opens on the login screen, registration happens as soon as
+  a session token exists.
+
+Open WebUI still requires the tools to be picked per chat. Click the cloud icon in the message box
+and select the connector.
+
 ## Work on local projects
 
 The **Workspace** button in the bottom chat status bar is the shortest path from chat to an actual
 project. It stays outside the Services & Connectors settings because it controls the current local
 chat workspace rather than adding another connector:
 
-1. Click **Choose workspace** and select an existing checkout or a folder for a new project. Nothing
-   is selected on a fresh installation, and the active path remains visible after selection.
+1. Click **Choose workspace**. The picker has two tabs:
+   - **Local** — recently used workspaces plus a folder browser. Nothing is selected on a fresh
+     installation, and the active path remains visible after selection.
+   - **GitHub** — repositories reachable with the token of the configured GitHub MCP connector. No
+     second credential is requested. Selecting a repository clones it into the clone folder shown at
+     the bottom of the picker, or fast-forwards an existing clone. A checkout with uncommitted
+     changes is opened as-is instead of being pulled.
 2. The desktop app starts or restarts Open Terminal in that exact folder and registers it only in
    the bundled local Open WebUI instance.
 3. In an Open WebUI chat, click the cloud icon and select **Local Open Terminal**. A tool-capable
    model can then create and edit files, run commands, use Git, install project dependencies, and
    execute builds and tests.
+
+The clone folder defaults to `~/OpenWebUI Workspaces` and can be overridden with `workspaces.root`
+in the desktop config. Cloning requires `git` on `PATH`; the token is passed through the environment
+so it never appears in process arguments.
 
 If a response mentions only `/mnt/uploads`, the chat used Open WebUI's isolated code interpreter
 instead of Local Open Terminal. Select **Local Open Terminal** from the cloud menu for host-folder
@@ -51,19 +83,20 @@ operating system supports it.
 Choose **Add → GitHub MCP** for an optional template based on GitHub's official MCP server. The
 template uses the official hosted endpoint at `https://api.githubcopilot.com/mcp/`, does not require
 Docker, and does not contain an account or token. The user must enter a fine-grained Personal Access
-Token with only the repository permissions needed for the intended tasks. The token is encrypted
-locally and excluded from registry exports.
+Token with only the repository permissions needed for the intended tasks. The token is required for
+this preset, not optional. It is encrypted locally and excluded from registry exports.
 
-After saving, add it in the bundled Open WebUI under **Admin Settings → Integrations → Add Server**
-as **MCP (Streamable HTTP)** with **Bearer** authentication. A blue **reachable** status in the
-desktop registry only confirms that the remote endpoint answered; Open WebUI connection and tool
-activation remain separate steps.
+After saving, the connector is registered in the bundled Open WebUI automatically. A blue
+**reachable** status in the desktop registry only confirms that the remote endpoint answered; tool
+selection in a chat remains a separate step.
+
+The same token backs the **GitHub** tab of the workspace picker, so one connection covers both API
+access and repository checkouts.
 
 GitHub MCP handles GitHub APIs such as repositories, issues, and pull requests. Open Terminal handles
 the checked-out files, shell, Git CLI, builds, and tests on the local machine. Use both when a task
-needs local implementation plus GitHub collaboration. Connecting GitHub MCP alone does not mount a
-repository as a local working tree; choose a local checkout with the chat Workspace button or clone
-the repository from Local Open Terminal into the selected folder.
+needs local implementation plus GitHub collaboration: pick the repository in the workspace picker to
+get a working tree, and keep GitHub MCP selected for issues and pull requests.
 
 ## Windows and `uvx`
 

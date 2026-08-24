@@ -4,7 +4,8 @@ import type {
   ManagedServiceDefinition,
   ManagedServiceImportPreview,
   ManagedServiceIntegration,
-  ManagedServiceSnapshot
+  ManagedServiceSnapshot,
+  ManagedServiceToolTarget
 } from '../shared/services/types'
 import { toIpcPlainValue } from '../shared/services/ipc-serialization'
 
@@ -24,6 +25,7 @@ export const managedServicesApi = {
   getManagedServiceLogs: (id: string): Promise<string[]> => request('logs', { id }),
   getManagedServiceIntegration: (id: string): Promise<ManagedServiceIntegration> =>
     request('integration', { id }),
+  getManagedServiceToolTargets: (): Promise<ManagedServiceToolTarget[]> => request('tool-targets'),
   suggestManagedServicePort: (): Promise<number> => request('suggest-port'),
   exportManagedServices: (): Promise<{ canceled: boolean; filePath?: string }> => request('export'),
   previewManagedServicesImport: (): Promise<ManagedServiceImportPreview | null> =>

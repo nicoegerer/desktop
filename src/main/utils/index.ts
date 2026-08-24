@@ -845,6 +845,10 @@ export interface AppConfig {
     variant: string
     extraArgs: string[]
   }
+  workspaces: {
+    root: string
+    recent: Array<{ path: string; name: string; repoFullName?: string; lastUsedAt: number }>
+  }
   envVars: Record<string, string>
   showSidebar: boolean
   spotlightPosition: { x: number; y: number } | null
@@ -881,6 +885,10 @@ const DEFAULT_CONFIG: AppConfig = {
     version: 'latest',
     variant: 'cpu',
     extraArgs: []
+  },
+  workspaces: {
+    root: '',
+    recent: []
   },
   envVars: {},
   showSidebar: false,

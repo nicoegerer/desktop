@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.6] - 2026-08-24
+
+### Added
+
+- **Connectors reach the chat automatically.** Every MCP and remote connector in the registry is now
+  written into Open WebUI's tool-server configuration when it changes and when a connection opens.
+  mcpo connectors register as OpenAPI servers, remote endpoints as MCP (Streamable HTTP) servers with
+  their bearer token. Connections added by hand in Open WebUI are left untouched, and a connector
+  removed from the registry is removed there as well. Registration requires an Open WebUI admin
+  session and waits for sign-in.
+- **GitHub repositories as workspaces.** The workspace picker has a GitHub tab that lists the
+  repositories reachable with the configured GitHub MCP token, so one connection covers both API
+  access and checkouts. Selecting a repository clones it into the workspace root or fast-forwards an
+  existing clone, then points Open Terminal at it. A checkout with uncommitted changes is opened
+  as-is instead of being pulled, and the token reaches `git` through the environment rather than
+  process arguments.
+- **Recent workspaces.** The picker keeps the last workspaces and marks the active one, so switching
+  between a local project and a repository no longer means browsing the file system again.
+
+### Fixed
+
+- **Connectors started but stayed invisible to the chat.** Starting Garmin MCP or GitHub MCP only
+  launched the process; Open WebUI's tool-server list stayed empty, so no chat could call them.
+- **GitHub token was labelled optional but required.** The bearer field of the hosted GitHub MCP
+  preset is now labelled as a required Personal Access Token, matching the validation that already
+  rejected an empty value.
+
 ## [0.0.20-services.5] - 2026-08-23
 
 ### Fixed
