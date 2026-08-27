@@ -157,7 +157,8 @@ const run = (
     electronAPI: {
       send: (data: Record<string, unknown>) => {
         bridge.push(data)
-        if (data.type === 'workspaceEnsure' && ensureResult) return Promise.resolve(ensureResult)
+        if ((data.type === 'workspaceEnsure' || data.type === 'workspaceMountRepo') && ensureResult)
+          return Promise.resolve(ensureResult)
         return Promise.resolve(null)
       }
     },
@@ -331,6 +332,34 @@ test('a saved local workspace is restored before the chat request is sent', asyn
   assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-ws-restored')
   assert.equal(JSON.parse(String(h.calls[1].body)).terminal_id, 'desktop-ws-restored')
   assert.equal(h.bridge.filter((call) => call.type === 'workspaceEnsure').length, 1)
+})
+
+test('a saved cloud workspace is remounted before the chat request is sent', async () => {
+  const h = run(
+    {
+      'chat-123': {
+        mode: 'cloud',
+        repoFullName: 'nicoegerer/test1',
+        branch: 'main',
+        terminalId: 'desktop-gh-old',
+        label: 'nicoegerer/test1'
+      }
+    },
+    '/c/chat-123',
+    { ok: true, terminal: { id: 'desktop-gh-restored', name: 'nicoegerer/test1' } }
+  )
+  const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+
+  await detached('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'inspect repository' }] })
+  })
+
+  assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-gh-restored')
+  const mounts = h.bridge.filter((call) => call.type === 'workspaceMountRepo')
+  assert.equal(mounts.length, 1)
+  assert.equal(mounts[0].repoFullName, 'nicoegerer/test1')
+  assert.equal(mounts[0].branch, 'main')
 })
 
 test('a request the page makes with no init is passed through', async () => {

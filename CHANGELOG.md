@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.19] - 2026-08-27
+
+### Fixed
+
+- **A cloud workspace became unavailable again after restarting the app.** Saved cloud selections
+  now remount their GitHub repository before the first new message, refresh Open WebUI's terminal
+  registration, and replace the stale terminal id in the conversation before sending.
+
 ## [0.0.20-services.18] - 2026-08-27
 
 ### Fixed

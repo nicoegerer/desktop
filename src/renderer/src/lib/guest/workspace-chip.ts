@@ -147,21 +147,22 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var readyTerminals = {};
   var terminalStarts = {};
   var ensureWorkspaceReady = function (selected) {
-    if (!selected || selected.mode !== 'local' || !selected.terminalId) {
+    if (!selected || !selected.terminalId) {
       return Promise.resolve(selected);
     }
     if (readyTerminals[selected.terminalId]) return Promise.resolve(selected);
     if (terminalStarts[selected.terminalId]) return terminalStarts[selected.terminalId];
 
     var requestedId = selected.terminalId;
-    terminalStarts[requestedId] = ask('workspaceEnsure', {
-      path: selected.path || '',
-      terminalId: requestedId
-    }).then(function (result) {
+    var requestType = selected.mode === 'cloud' ? 'workspaceMountRepo' : 'workspaceEnsure';
+    var request = selected.mode === 'cloud'
+      ? { repoFullName: selected.repoFullName || '', branch: selected.branch || '' }
+      : { path: selected.path || '', terminalId: requestedId };
+    terminalStarts[requestedId] = ask(requestType, request).then(function (result) {
       delete terminalStarts[requestedId];
       if (!result || !result.ok || !result.terminal) return selected;
       var restored = Object.assign({}, selected, {
-        path: result.path,
+        path: result.path || selected.path,
         terminalId: result.terminal.id,
         label: result.terminal.name || selected.label
       });
