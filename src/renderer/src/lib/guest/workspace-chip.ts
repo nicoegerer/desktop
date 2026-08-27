@@ -255,6 +255,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   // If that ever stops working, the menu is shown again rather than leaving a
   // chip that looks authoritative but selects nothing.
   var remoteControlBroken = false;
+  var selectionBeingApplied = '';
+  var appliedSelection = '';
+  var selectionApplyAttempts = {};
 
   var findTerminalMenuButton = function () {
     var buttons = document.querySelectorAll('button[type="button"]');
@@ -344,6 +347,39 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       setMenuHidden(!remoteControlBroken);
       scheduleRender();
       if (done) done(ok);
+    });
+  };
+
+  // Open WebUI rebuilds its composer store after reloads and route changes.
+  // The desktop selection survives in localStorage, but until it is replayed
+  // into that store the Files panel remains on /mnt/uploads and the model sees
+  // no active terminal. Reconcile once per conversation/terminal combination;
+  // ensureWorkspaceReady also restarts a workspace process after an app launch.
+  var reconcileSelection = function (selected) {
+    if (!selected || !selected.terminalId) return;
+    var key = chatKey() + ':' + selected.terminalId;
+    if (selectionBeingApplied === key || appliedSelection === key) return;
+    // Wait for Open WebUI's composer and terminal menu to exist. Its DOM
+    // observer will call render again as each part mounts.
+    if (!findTerminalMenuButton()) return;
+    selectionBeingApplied = key;
+    ensureWorkspaceReady(selected).then(function (ready) {
+      var current = selection();
+      if (!current || current.terminalId !== selected.terminalId) {
+        selectionBeingApplied = '';
+        return;
+      }
+      applySelection(ready, function (ok) {
+        selectionBeingApplied = '';
+        if (ok) {
+          appliedSelection = key;
+          delete selectionApplyAttempts[key];
+          return;
+        }
+        selectionApplyAttempts[key] = (selectionApplyAttempts[key] || 0) + 1;
+        if (selectionApplyAttempts[key] < 4) setTimeout(scheduleRender, 500);
+        else appliedSelection = key;
+      });
     });
   };
 
@@ -612,6 +648,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     setMenuHidden(!remoteControlBroken);
 
     var s = selection();
+    reconcileSelection(s);
     var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
     if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
     var text = label();

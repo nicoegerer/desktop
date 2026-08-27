@@ -2490,6 +2490,24 @@ if (!gotTheLock) {
     validateOpenTerminalProcess()
     validateLlamaCppProcess()
 
+    // Honour the setting shown in Settings -> Open Terminal. Previously the
+    // switch was persisted but never read during startup, so the service only
+    // ran after pressing the manual Start button.
+    if (CONFIG?.openTerminal?.enabled) {
+      try {
+        sendToRenderer('status:open-terminal', 'starting')
+        const result = await startOpenTerminal((status) => {
+          sendToRenderer('status:open-terminal-setup', status)
+        })
+        sendToRenderer('status:open-terminal', 'started')
+        sendToRenderer('open-terminal:ready', result)
+        scheduleOpenWebUISync()
+      } catch (error) {
+        log.error('Auto-start Open Terminal failed:', error)
+        sendToRenderer('status:open-terminal', 'failed')
+      }
+    }
+
     // Reopen the workspaces that were active in the previous session, so their
     // terminals are selectable in a chat without touching the picker first.
     // Workspaces are started when a conversation asks for one, not on launch.

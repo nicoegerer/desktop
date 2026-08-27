@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.20] - 2026-08-27
+
+### Fixed
+
+- **Open Terminal still had to be started manually.** The desktop now honours the saved
+  “Start on launch” setting and starts, reports, and registers Open Terminal during app startup.
+- **A saved workspace was shown in the chat chip but the Files panel and model remained on
+  `/mnt/uploads`.** Each conversation now restores its selected terminal into Open WebUI's own
+  composer state after reloads and route changes, restarting that workspace process when needed.
+
 ## [0.0.20-services.19] - 2026-08-27
 
 ### Fixed
