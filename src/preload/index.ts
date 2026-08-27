@@ -196,6 +196,8 @@ const api = {
     ipcRenderer.invoke('workspace:chip:ensure', request ?? {}),
   workspaceKeepAlive: (request: { ids: string[] }) =>
     ipcRenderer.invoke('workspace:chip:keep-alive', request?.ids ?? []),
+  workspaceListFiles: (request: { terminalId: string; directory?: string }) =>
+    ipcRenderer.invoke('workspace:chip:list-files', request ?? {}),
   workspaceMountRepo: (request: { repoFullName: string; branch: string }) =>
     ipcRenderer.invoke('workspace:chip:cloud', {
       repoFullName: request?.repoFullName,

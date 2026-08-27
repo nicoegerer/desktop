@@ -15,7 +15,8 @@ import {
   Menu,
   ipcMain,
   Tray,
-  dialog
+  dialog,
+  net as electronNet
 } from 'electron'
 import path, { join } from 'path'
 import { readFile, statfs } from 'fs/promises'
@@ -2110,6 +2111,12 @@ if (!gotTheLock) {
         const wanted = new Set(
           Array.isArray(keep) ? keep.filter((id) => typeof id === 'string') : []
         )
+        // The configured Open Terminal instance is a service, not a chat-owned
+        // workspace. An empty draft chat must never stop the process that the
+        // user explicitly asked to run at application startup.
+        const config = await getConfig()
+        const serviceCwd = config.openTerminal?.enabled ? config.openTerminal?.cwd : ''
+        if (serviceCwd) wanted.add(workspaceTerminalId(serviceCwd))
         const unmounted = unmountGithubRepos(wanted)
         const stopped: string[] = []
         for (const terminal of listWorkspaceTerminals()) {
@@ -2132,6 +2139,34 @@ if (!gotTheLock) {
         return chipError(cause)
       }
     })
+
+    ipcMain.handle(
+      'workspace:chip:list-files',
+      async (_event, request: { terminalId?: string; directory?: string }) => {
+        try {
+          const terminalId = String(request?.terminalId ?? '')
+          const target = [
+            ...listWorkspaceTerminals(),
+            ...listGithubMounts().map((mount) => ({ ...mount, cwd: mount.name, status: 'started' }))
+          ].find((terminal) => terminal.id === terminalId)
+          if (!target?.url || !target?.apiKey) throw new Error('Workspace is not running')
+
+          const directory = String(request?.directory ?? '').replace(/\\/g, '/') || '.'
+          const response = await electronNet.fetch(
+            `${target.url.replace(/\/$/, '')}/files/list?directory=${encodeURIComponent(directory)}`,
+            {
+              headers: { Authorization: `Bearer ${target.apiKey}` },
+              signal: AbortSignal.timeout(20_000)
+            }
+          )
+          if (!response.ok) throw new Error(`File listing returned ${response.status}`)
+          const payload = await response.json()
+          return { ok: true, ...payload }
+        } catch (cause) {
+          return chipError(cause)
+        }
+      }
+    )
 
     // A cloud workspace is browsable without a checkout: the repository is
     // mounted read-only and registered as a terminal server, so the file panel

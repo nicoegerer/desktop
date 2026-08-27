@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.21] - 2026-08-27
+
+### Fixed
+
+- **Open Terminal started on launch and immediately turned grey again.** The chat workspace cleanup
+  no longer stops the persistent Open Terminal instance selected by the “Start on launch” setting.
+- **The Files tab stayed on `/mnt/uploads` and failed after selecting a workspace.** That panel is
+  Open WebUI's isolated Pyodide upload disk, not a terminal filesystem. With a workspace selected,
+  the desktop now replaces its failed listing with the active local or GitHub workspace tree fetched
+  through the conversation's exact terminal id.
+
 ## [0.0.20-services.20] - 2026-08-27
 
 ### Fixed

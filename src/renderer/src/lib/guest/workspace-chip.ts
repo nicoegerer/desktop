@@ -258,6 +258,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var selectionBeingApplied = '';
   var appliedSelection = '';
   var selectionApplyAttempts = {};
+  var filePaths = {};
 
   var findTerminalMenuButton = function () {
     var buttons = document.querySelectorAll('button[type="button"]');
@@ -381,6 +382,89 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         else appliedSelection = key;
       });
     });
+  };
+
+  // Open WebUI's built-in "Files" tab is the isolated Pyodide upload disk; it
+  // is not the selected terminal's filesystem. When that tab is visible for a
+  // workspace it consequently tries /mnt/uploads and fails. Replace only its
+  // failed content area with a small browser backed by the selected terminal.
+  var renderWorkspaceFiles = function (selected) {
+    if (!selected || !selected.terminalId) return;
+    var leaves = document.querySelectorAll('div, span, p');
+    var failure = null;
+    for (var i = 0; i < leaves.length; i++) {
+      var node = leaves[i];
+      if (node.children && node.children.length) continue;
+      if ((node.textContent || '').trim() === 'Failed to list directory') {
+        failure = node;
+        break;
+      }
+    }
+    if (!failure || !failure.parentElement) return;
+    var host = failure.parentElement;
+    var existing = host.querySelector('[data-desktop-workspace-files]');
+    var key = chatKey() + ':' + selected.terminalId;
+    if (existing && existing.getAttribute('data-key') === key) return;
+    if (existing) existing.remove();
+    failure.style.display = 'none';
+
+    var root = document.createElement('div');
+    root.setAttribute('data-desktop-workspace-files', '1');
+    root.setAttribute('data-key', key);
+    root.style.cssText = 'width:100%;height:100%;padding:18px;overflow:auto;text-align:left;';
+    host.appendChild(root);
+
+    var directory = filePaths[key] || '';
+    var paint = function () {
+      root.innerHTML = '';
+      var heading = document.createElement('div');
+      heading.style.cssText = 'font-size:12px;opacity:.65;margin-bottom:12px;display:flex;gap:8px;align-items:center;';
+      heading.textContent = (selected.label || selected.repoFullName || 'Workspace') +
+        (directory ? ' / ' + directory : '');
+      root.appendChild(heading);
+
+      var loading = document.createElement('div');
+      loading.style.cssText = 'font-size:12px;opacity:.45;';
+      loading.textContent = t('Dateien werden geladen …', 'Loading files …');
+      root.appendChild(loading);
+
+      ask('workspaceListFiles', { terminalId: selected.terminalId, directory: directory || '.' })
+        .then(function (result) {
+          if (!root.isConnected || root.getAttribute('data-key') !== key) return;
+          loading.remove();
+          if (!result || !result.ok) {
+            var error = document.createElement('div');
+            error.style.cssText = 'font-size:12px;color:#ef4444;';
+            error.textContent = (result && result.error) || t('Ordner konnte nicht gelesen werden.', 'Could not read folder.');
+            root.appendChild(error);
+            return;
+          }
+          var entries = Array.isArray(result.entries) ? result.entries.slice() : [];
+          entries.sort(function (a, b) {
+            if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+            return String(a.name).localeCompare(String(b.name));
+          });
+          if (directory) {
+            var up = button('..', function () {
+              directory = directory.split('/').filter(Boolean).slice(0, -1).join('/');
+              filePaths[key] = directory; paint();
+            }, false, ICON_FOLDER);
+            up.style.width = '100%'; up.style.padding = '7px 4px';
+            root.appendChild(up);
+          }
+          entries.forEach(function (entry) {
+            var row = button(String(entry.name || ''), function () {
+              if (entry.type !== 'directory') return;
+              directory = [directory, entry.name].filter(Boolean).join('/');
+              filePaths[key] = directory; paint();
+            }, false, entry.type === 'directory' ? ICON_FOLDER : ICON_EMPTY);
+            row.style.width = '100%'; row.style.padding = '7px 4px';
+            row.style.opacity = entry.type === 'directory' ? '1' : '.72';
+            root.appendChild(row);
+          });
+        });
+    };
+    paint();
   };
 
   var label = function () {
@@ -649,6 +733,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
 
     var s = selection();
     reconcileSelection(s);
+    renderWorkspaceFiles(s);
     var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
     if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
     var text = label();
