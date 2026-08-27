@@ -65,7 +65,11 @@ interface Harness {
   navigate: (path: string) => void
 }
 
-const run = (seed?: Record<string, unknown>, initialPath = '/c/chat-123'): Harness => {
+const run = (
+  seed?: Record<string, unknown>,
+  initialPath = '/c/chat-123',
+  ensureResult?: Record<string, unknown>
+): Harness => {
   const calls: Array<{ url: string; body: unknown }> = []
   const bridge: Array<Record<string, unknown>> = []
   const store: Record<string, string> = {}
@@ -153,6 +157,7 @@ const run = (seed?: Record<string, unknown>, initialPath = '/c/chat-123'): Harne
     electronAPI: {
       send: (data: Record<string, unknown>) => {
         bridge.push(data)
+        if (data.type === 'workspaceEnsure' && ensureResult) return Promise.resolve(ensureResult)
         return Promise.resolve(null)
       }
     },
@@ -300,6 +305,32 @@ test('the selected workspace applies to every message in the same conversation',
 
   assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-ws-test')
   assert.equal(JSON.parse(String(h.calls[1].body)).terminal_id, 'desktop-ws-test')
+})
+
+test('a saved local workspace is restored before the chat request is sent', async () => {
+  const h = run(
+    { 'chat-123': { mode: 'local', terminalId: 'desktop-ws-old', label: 'test' } },
+    '/c/chat-123',
+    {
+      ok: true,
+      path: 'C:\\work\\test',
+      terminal: { id: 'desktop-ws-restored', name: 'test' }
+    }
+  )
+  const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+
+  await detached('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'first' }] })
+  })
+  await detached('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'second' }] })
+  })
+
+  assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-ws-restored')
+  assert.equal(JSON.parse(String(h.calls[1].body)).terminal_id, 'desktop-ws-restored')
+  assert.equal(h.bridge.filter((call) => call.type === 'workspaceEnsure').length, 1)
 })
 
 test('a request the page makes with no init is passed through', async () => {

@@ -192,6 +192,8 @@ const api = {
   workspaceListRepos: () => ipcRenderer.invoke('workspace:chip:repos'),
   workspaceOpenLocal: (request: { path: string }) =>
     ipcRenderer.invoke('workspace:chip:open', request?.path),
+  workspaceEnsure: (request: { path?: string; terminalId?: string }) =>
+    ipcRenderer.invoke('workspace:chip:ensure', request ?? {}),
   workspaceKeepAlive: (request: { ids: string[] }) =>
     ipcRenderer.invoke('workspace:chip:keep-alive', request?.ids ?? []),
   workspaceMountRepo: (request: { repoFullName: string; branch: string }) =>

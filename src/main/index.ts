@@ -61,7 +61,8 @@ import {
   startWorkspaceTerminal,
   stopWorkspaceTerminal,
   stopAllWorkspaceTerminals,
-  setActiveWorkspaceTerminal
+  setActiveWorkspaceTerminal,
+  workspaceTerminalId
 } from './utils/open-terminal'
 
 import {
@@ -2051,6 +2052,40 @@ if (!gotTheLock) {
       }
     })
 
+    // Local workspace selections outlive the Open Terminal process in the
+    // embedded page's localStorage. Restore only the workspace of the current
+    // conversation after an app restart; do not reopen every recent folder.
+    ipcMain.handle(
+      'workspace:chip:ensure',
+      async (_event, request: { path?: string; terminalId?: string }) => {
+        try {
+          const requestedId =
+            typeof request?.terminalId === 'string' ? request.terminalId.trim() : ''
+          const recent = await listWorkspaces()
+          const workspacePath =
+            recent.find((entry) => workspaceTerminalId(entry.path) === requestedId)?.path || ''
+          if (!workspacePath)
+            throw new Error('The selected workspace folder is no longer available.')
+
+          const terminal = await startWorkspaceTerminal(workspacePath)
+          await setWorkspaceActive(workspacePath, true)
+          sendToRenderer('status:open-terminal', 'started')
+          sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
+          const sync = await syncOpenWebUI()
+          if (sync.status === 'failed') {
+            throw new Error('The restored workspace could not be registered in Open WebUI.')
+          }
+          return {
+            ok: true,
+            path: workspacePath,
+            terminal: { id: terminal.id, name: path.basename(workspacePath) || workspacePath }
+          }
+        } catch (cause) {
+          return chipError(cause)
+        }
+      }
+    )
+
     ipcMain.handle('workspace:chip:repos', async () => {
       try {
         const token = getManagedServicesManager()?.getGithubAccessToken()
@@ -2072,7 +2107,9 @@ if (!gotTheLock) {
     // be deleted or moved.
     ipcMain.handle('workspace:chip:keep-alive', async (_event, keep: string[]) => {
       try {
-        const wanted = new Set(Array.isArray(keep) ? keep.filter((id) => typeof id === 'string') : [])
+        const wanted = new Set(
+          Array.isArray(keep) ? keep.filter((id) => typeof id === 'string') : []
+        )
         const unmounted = unmountGithubRepos(wanted)
         const stopped: string[] = []
         for (const terminal of listWorkspaceTerminals()) {

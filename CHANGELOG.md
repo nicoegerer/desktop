@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.16] - 2026-08-27
+
+### Fixed
+
+- **A local workspace stopped working after an app restart or update.** The conversation kept its
+  stable terminal id, but the process behind that id naturally ended with the previous app session.
+  The current conversation now restores only its selected folder, waits for Open Terminal to start,
+  registers the fresh endpoint in Open WebUI, and only then sends the message. Existing selections
+  are recovered from the user's recent-workspace list, so no folder needs to be selected again and
+  unused folders remain closed.
+
 ## [0.0.20-services.15] - 2026-08-27
 
 ### Fixed

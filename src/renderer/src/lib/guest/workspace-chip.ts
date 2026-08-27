@@ -119,11 +119,15 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         // permanent conversation id asynchronously after this fetch starts.
         pendingSelection = selection();
         pendingSourceKey = chatKey();
-        var patched = applyWorkspaceToPayload(JSON.parse(init.body), {
-          selection: selection(),
-          alwaysOnToolIds: opts.alwaysOnToolIds
+        var originalBody = JSON.parse(init.body);
+        return ensureWorkspaceReady(pendingSelection).then(function (readySelection) {
+          var patched = applyWorkspaceToPayload(originalBody, {
+            selection: readySelection,
+            alwaysOnToolIds: opts.alwaysOnToolIds
+          });
+          var nextInit = Object.assign({}, init, { body: JSON.stringify(patched) });
+          return originalFetch.call(window, input, nextInit);
         });
-        init = Object.assign({}, init, { body: JSON.stringify(patched) });
       }
     } catch (e) {
       // Never let the workspace layer break sending a message.
@@ -139,6 +143,37 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var ask = function (type, data) {
     if (!window.electronAPI || !window.electronAPI.send) return Promise.resolve(null);
     return window.electronAPI.send(Object.assign({ type: type }, data || {}));
+  };
+  var readyTerminals = {};
+  var terminalStarts = {};
+  var ensureWorkspaceReady = function (selected) {
+    if (!selected || selected.mode !== 'local' || !selected.terminalId) {
+      return Promise.resolve(selected);
+    }
+    if (readyTerminals[selected.terminalId]) return Promise.resolve(selected);
+    if (terminalStarts[selected.terminalId]) return terminalStarts[selected.terminalId];
+
+    var requestedId = selected.terminalId;
+    terminalStarts[requestedId] = ask('workspaceEnsure', {
+      path: selected.path || '',
+      terminalId: requestedId
+    }).then(function (result) {
+      delete terminalStarts[requestedId];
+      if (!result || !result.ok || !result.terminal) return selected;
+      var restored = Object.assign({}, selected, {
+        path: result.path,
+        terminalId: result.terminal.id,
+        label: result.terminal.name || selected.label
+      });
+      var all = readAll();
+      all[chatKey()] = restored;
+      writeAll(all);
+      readyTerminals[restored.terminalId] = true;
+      reportLiveWorkspaces();
+      scheduleRender();
+      return restored;
+    });
+    return terminalStarts[requestedId];
   };
 
   // ── Open WebUI chrome ───────────────────────────────
@@ -361,7 +396,13 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         renderPanel();
         return;
       }
-      select({ mode: 'local', terminalId: result.terminal.id, label: name || result.terminal.name });
+      readyTerminals[result.terminal.id] = true;
+      select({
+        mode: 'local',
+        path: path,
+        terminalId: result.terminal.id,
+        label: name || result.terminal.name
+      });
       closePanel();
     });
   };
@@ -487,6 +528,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     if (panel) { closePanel(); return; }
     note = '';
     var s = selection();
+    if (s && s.mode === 'local') ensureWorkspaceReady(s);
     mode = s && s.mode === 'cloud' ? 'cloud' : 'local';
 
     panel = document.createElement('div');
