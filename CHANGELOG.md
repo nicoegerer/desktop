@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.17] - 2026-08-27
+
+### Fixed
+
+- **A selected local folder was displayed but the model still said it could not write files.** Workspace
+  requests now explicitly enable Open WebUI's terminal capability and include a per-conversation
+  instruction to inspect and modify the selected working directory with Open Terminal.
+- **Cloud repositories lost their file access when a message was sent.** The mounted repository
+  terminal id now stays attached to every message. Open Terminal provides the repository tree and
+  file reading while GitHub MCP performs edits, commits, and pushes without a local checkout.
+
 ## [0.0.20-services.16] - 2026-08-27
 
 ### Fixed

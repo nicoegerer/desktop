@@ -38,6 +38,25 @@ export function applyWorkspaceToPayload(
 
   const next: Record<string, unknown> = { ...body }
   const marker = '[desktop-cloud-workspace]'
+  const localMarker = '[desktop-local-workspace]'
+
+  if (next.model_item && typeof next.model_item === 'object') {
+    const modelItem = next.model_item as Record<string, unknown>
+    const info =
+      modelItem.info && typeof modelItem.info === 'object'
+        ? (modelItem.info as Record<string, unknown>)
+        : {}
+    const meta =
+      info.meta && typeof info.meta === 'object' ? (info.meta as Record<string, unknown>) : {}
+    const capabilities =
+      meta.capabilities && typeof meta.capabilities === 'object'
+        ? (meta.capabilities as Record<string, unknown>)
+        : {}
+    next.model_item = {
+      ...modelItem,
+      info: { ...info, meta: { ...meta, capabilities: { ...capabilities, terminal: true } } }
+    }
+  }
 
   // ── Connectors are always available ────────────────
   const existingToolIds = Array.isArray(next.tool_ids) ? (next.tool_ids as string[]) : []
@@ -53,7 +72,9 @@ export function applyWorkspaceToPayload(
 
   // Drop an instruction left over from an earlier turn before adding the
   // current one, so switching workspaces mid-chat cannot stack them.
-  const messages = Array.isArray(next.messages) ? (next.messages as Array<Record<string, unknown>>) : null
+  const messages = Array.isArray(next.messages)
+    ? (next.messages as Array<Record<string, unknown>>)
+    : null
   const cleaned = messages
     ? messages.filter(
         (message) =>
@@ -61,7 +82,7 @@ export function applyWorkspaceToPayload(
             message &&
             message.role === 'system' &&
             typeof message.content === 'string' &&
-            message.content.indexOf(marker) !== -1
+            (message.content.indexOf(marker) !== -1 || message.content.indexOf(localMarker) !== -1)
           )
       )
     : null
@@ -73,13 +94,24 @@ export function applyWorkspaceToPayload(
 
   if (selection.mode === 'local') {
     if (selection.terminalId) next.terminal_id = selection.terminalId
-    if (cleaned) next.messages = cleaned
+    if (cleaned) {
+      const instruction =
+        localMarker +
+        ' A local workspace is active through Open Terminal. Use the terminal file tools to inspect and modify' +
+        ' files directly in its current working directory. Do not claim that files cannot be written and do not' +
+        ' return a replacement file only as a code block when the user asked you to create or edit it.'
+      const systemIndex = cleaned.findIndex((message) => message && message.role === 'system')
+      const entry = { role: 'system', content: instruction }
+      next.messages =
+        systemIndex === -1
+          ? [entry, ...cleaned]
+          : [...cleaned.slice(0, systemIndex + 1), entry, ...cleaned.slice(systemIndex + 1)]
+    }
     return next
   }
 
-  // Cloud: no terminal at all, and the repository is named in a system message
-  // so the instruction is scoped to this conversation instead of the account.
-  delete next.terminal_id
+  if (selection.terminalId) next.terminal_id = selection.terminalId
+  else delete next.terminal_id
   if (cleaned) {
     const instruction =
       marker +
@@ -87,9 +119,9 @@ export function applyWorkspaceToPayload(
       String(selection.repoFullName ?? '') +
       '` on branch `' +
       String(selection.branch ?? '') +
-      '`. Work in it through the GitHub tools: read files with the repository content tools and' +
-      ' commit changes to that branch. There is no local checkout of this repository, so do not' +
-      ' look for its files on disk and do not run git against it in a terminal.'
+      '`. Use the active Open Terminal tools to inspect files in the mounted repository. Use the GitHub tools to' +
+      ' modify files, commit, and push changes to that branch when requested. This mount is managed by the' +
+      ' desktop; do not switch to another local folder.'
 
     const systemIndex = cleaned.findIndex((message) => message && message.role === 'system')
     const entry = { role: 'system', content: instruction }

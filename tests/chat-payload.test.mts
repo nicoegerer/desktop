@@ -60,6 +60,27 @@ test('a local workspace sets the terminal for this request', () => {
   )
 
   assert.equal(out.terminal_id, 'desktop-ws-abc123')
+  assert.ok(
+    (out.messages as Array<Record<string, string>>).some((message) =>
+      message.content.includes('[desktop-local-workspace]')
+    )
+  )
+})
+
+test('a selected workspace enables terminal capability on the model item', () => {
+  const out = applyWorkspaceToPayload(
+    {
+      messages: userTurn(),
+      model_item: { info: { meta: { capabilities: { terminal: false, vision: true } } } }
+    },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-abc123' } })
+  )
+
+  const modelItem = out.model_item as {
+    info: { meta: { capabilities: Record<string, boolean> } }
+  }
+  assert.equal(modelItem.info.meta.capabilities.terminal, true)
+  assert.equal(modelItem.info.meta.capabilities.vision, true)
 })
 
 test('a local workspace overrides a terminal Open WebUI had selected', () => {
@@ -73,20 +94,25 @@ test('a local workspace overrides a terminal Open WebUI had selected', () => {
 
 // ─── Cloud workspace ────────────────────────────────────
 
-test('a cloud workspace names the repository and drops the terminal', () => {
+test('a cloud workspace names the repository and keeps its mounted terminal', () => {
   const out = applyWorkspaceToPayload(
     { messages: userTurn(), terminal_id: 'desktop-ws-abc123' },
     patch({
-      selection: { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' }
+      selection: {
+        mode: 'cloud',
+        repoFullName: 'nicoegerer/test1',
+        branch: 'main',
+        terminalId: 'desktop-gh-test1'
+      }
     })
   )
 
-  assert.ok(!('terminal_id' in out), 'a cloud workspace must not carry a terminal')
+  assert.equal(out.terminal_id, 'desktop-gh-test1')
   const messages = out.messages as Array<Record<string, string>>
   assert.equal(messages[0].role, 'system')
   assert.ok(messages[0].content.includes('nicoegerer/test1'))
   assert.ok(messages[0].content.includes('`main`'))
-  assert.ok(messages[0].content.includes('no local checkout'))
+  assert.ok(messages[0].content.includes('mounted repository'))
   assert.equal(messages[1].role, 'user')
 })
 
