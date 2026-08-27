@@ -8,6 +8,7 @@ import {
   sliceFile,
   toFileEntries
 } from '../src/shared/services/github-contents.ts'
+import { githubWorkspaceOpenApi } from '../src/shared/services/github-workspace-openapi.ts'
 
 // ─── Paths ──────────────────────────────────────────────
 
@@ -104,4 +105,16 @@ test('a file without a trailing newline is not padded', () => {
 test('a binary file is recognised so it can be refused', () => {
   assert.equal(isBinary(Buffer.from('plain text')), false)
   assert.equal(isBinary(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d])), true)
+})
+
+test('a GitHub workspace publishes the read-only OpenAPI tools Open WebUI loads', () => {
+  const schema = githubWorkspaceOpenApi('nicoegerer/test1') as {
+    info: { title: string }
+    paths: Record<string, { get: { operationId: string } }>
+  }
+
+  assert.equal(schema.info.title, 'GitHub workspace: nicoegerer/test1')
+  assert.equal(schema.paths['/files/list'].get.operationId, 'list_files')
+  assert.equal(schema.paths['/files/read'].get.operationId, 'read_file')
+  assert.ok(!('/files/write' in schema.paths))
 })

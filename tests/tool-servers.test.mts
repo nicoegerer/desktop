@@ -8,6 +8,7 @@ import {
   mergeDefaultTools,
   mergeTerminalServers,
   mergeToolServers,
+  shouldWriteTerminalServers,
   type TerminalServerConnection,
   type ToolServerConnection,
   type WorkspaceTerminalTarget
@@ -338,4 +339,14 @@ test('an unchanged workspace set produces a byte-identical list', () => {
   const second = mergeTerminalServers(first, terminals)
 
   assert.equal(JSON.stringify(first), JSON.stringify(second))
+})
+
+test('a workspace start can force Open WebUI to reload unchanged terminal specs', () => {
+  const terminals = mergeTerminalServers(
+    [],
+    [workspace({ id: 'desktop-ws-1', cwd: '/home/me/test1' })]
+  )
+
+  assert.equal(shouldWriteTerminalServers(terminals, terminals), false)
+  assert.equal(shouldWriteTerminalServers(terminals, terminals, true), true)
 })

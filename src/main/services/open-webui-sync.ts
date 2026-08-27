@@ -6,13 +6,11 @@ import {
   mergeDefaultTools,
   mergeTerminalServers,
   mergeToolServers,
+  shouldWriteTerminalServers,
   type TerminalServerConnection,
   type ToolServerConnection
 } from '../../shared/services/tool-servers'
-import type {
-  ManagedServiceToolTarget,
-  OpenWebUISyncResult
-} from '../../shared/services/types'
+import type { ManagedServiceToolTarget, OpenWebUISyncResult } from '../../shared/services/types'
 import { listWorkspaceTerminals } from '../utils/open-terminal'
 import { listGithubMounts } from './github-fs'
 
@@ -134,10 +132,7 @@ const syncUserSettings = async (
   const currentSystem = typeof ui.system === 'string' ? ui.system : ''
   const nextSystem = applyCloudWorkspacePrompt(currentSystem, null)
 
-  if (
-    JSON.stringify(currentTools) === JSON.stringify(nextTools) &&
-    currentSystem === nextSystem
-  ) {
+  if (JSON.stringify(currentTools) === JSON.stringify(nextTools) && currentSystem === nextSystem) {
     return false
   }
 
@@ -158,7 +153,9 @@ const syncUserSettings = async (
   return true
 }
 
-export const syncOpenWebUI = async (): Promise<OpenWebUISyncResult> => {
+export const syncOpenWebUI = async (
+  options: { refreshTerminals?: boolean } = {}
+): Promise<OpenWebUISyncResult> => {
   if (!context) return { status: 'skipped', reason: 'not-configured', toolServers: 0, terminals: 0 }
 
   const baseUrl = context.resolveBaseUrl()
@@ -229,11 +226,19 @@ export const syncOpenWebUI = async (): Promise<OpenWebUISyncResult> => {
   // when something actually changed.
   let wrote = false
   if (JSON.stringify(currentTools) !== JSON.stringify(nextTools)) {
-    if (!(await writeConfig(baseUrl, token, 'tool_servers', { TOOL_SERVER_CONNECTIONS: nextTools })))
+    if (
+      !(await writeConfig(baseUrl, token, 'tool_servers', { TOOL_SERVER_CONNECTIONS: nextTools }))
+    )
       return { status: 'failed', reason: 'tool-servers-write', toolServers: 0, terminals: 0 }
     wrote = true
   }
-  if (JSON.stringify(currentTerminals) !== JSON.stringify(nextTerminals)) {
+  if (
+    shouldWriteTerminalServers(
+      currentTerminals as TerminalServerConnection[],
+      nextTerminals,
+      options.refreshTerminals
+    )
+  ) {
     if (
       !(await writeConfig(baseUrl, token, 'terminal_servers', {
         TERMINAL_SERVER_CONNECTIONS: nextTerminals

@@ -7,6 +7,12 @@ import type { ManagedServiceToolTarget } from './types'
  */
 export const DESKTOP_TOOL_PREFIX = 'desktop-'
 
+export const shouldWriteTerminalServers = (
+  current: TerminalServerConnection[],
+  next: TerminalServerConnection[],
+  refresh = false
+): boolean => refresh || JSON.stringify(current) !== JSON.stringify(next)
+
 /** Open WebUI keeps extra keys on these entries, so unknown fields are preserved. */
 export interface ToolServerConnection {
   type?: string
@@ -26,8 +32,7 @@ export interface ToolServerConnection {
   [key: string]: unknown
 }
 
-export const toolServerInfoId = (serviceId: string): string =>
-  `${DESKTOP_TOOL_PREFIX}${serviceId}`
+export const toolServerInfoId = (serviceId: string): string => `${DESKTOP_TOOL_PREFIX}${serviceId}`
 
 // ─── Default tool selection ─────────────────────────────
 //
@@ -46,7 +51,8 @@ export const connectorToolId = (target: Pick<ManagedServiceToolTarget, 'id' | 'k
 }
 
 const isDesktopToolId = (id: string): boolean =>
-  id.startsWith(`server:${DESKTOP_TOOL_PREFIX}`) || id.startsWith(`server:mcp:${DESKTOP_TOOL_PREFIX}`)
+  id.startsWith(`server:${DESKTOP_TOOL_PREFIX}`) ||
+  id.startsWith(`server:mcp:${DESKTOP_TOOL_PREFIX}`)
 
 /**
  * Keep every tool the user chose and make the desktop's own connectors default
@@ -63,9 +69,7 @@ export const mergeDefaultTools = (
 
   // Preserve the user's ordering; only genuinely new connectors are appended.
   const preserved = current.filter((id) => isDesktopToolId(id) && wanted.includes(id))
-  return [...kept, ...preserved, ...missing].filter(
-    (id, index, all) => all.indexOf(id) === index
-  )
+  return [...kept, ...preserved, ...missing].filter((id, index, all) => all.indexOf(id) === index)
 }
 
 // ─── Cloud workspace prompt ─────────────────────────────
@@ -107,7 +111,9 @@ export const applyCloudWorkspacePrompt = (
   const userText = start === -1 ? source : `${before.trimEnd()}\n${after.trimStart()}`.trim()
 
   if (!workspace) return userText
-  return userText ? `${userText}\n\n${cloudWorkspaceBlock(workspace)}` : cloudWorkspaceBlock(workspace)
+  return userText
+    ? `${userText}\n\n${cloudWorkspaceBlock(workspace)}`
+    : cloudWorkspaceBlock(workspace)
 }
 
 /** A workspace terminal as Open WebUI stores it under `terminal_server.connections`. */
@@ -193,7 +199,9 @@ export const mergeTerminalServers = (
 
   for (const [id, terminal] of managed) {
     if (!applied.has(id)) {
-      merged.push(terminalEntry(terminal, null, terminal.name || workspaceDisplayName(terminal.cwd)))
+      merged.push(
+        terminalEntry(terminal, null, terminal.name || workspaceDisplayName(terminal.cwd))
+      )
     }
   }
 

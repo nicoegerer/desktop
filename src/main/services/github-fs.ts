@@ -11,6 +11,7 @@ import {
   sliceFile,
   toFileEntries
 } from '../../shared/services/github-contents'
+import { githubWorkspaceOpenApi } from '../../shared/services/github-workspace-openapi'
 
 /**
  * A read-only filesystem view of a GitHub repository, served in the shape Open
@@ -178,6 +179,10 @@ const handle = async (
   }
 
   try {
+    if (route === '/openapi.json') {
+      send(response, 200, githubWorkspaceOpenApi(mount.repoFullName))
+      return
+    }
     if (route === '/info') {
       send(response, 200, {
         info:
@@ -192,7 +197,11 @@ const handle = async (
       return
     }
     if (route === '/files/list') {
-      send(response, 200, await listDirectory(mount, repoPath(url.searchParams.get('directory') ?? '')))
+      send(
+        response,
+        200,
+        await listDirectory(mount, repoPath(url.searchParams.get('directory') ?? ''))
+      )
       return
     }
     if (route === '/files/read') {

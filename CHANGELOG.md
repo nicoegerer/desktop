@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.18] - 2026-08-27
+
+### Fixed
+
+- **Local workspace tools stayed unavailable after Open Terminal had started.** Open WebUI caches
+  terminal OpenAPI specs separately from their saved connections. Selecting or restoring a folder
+  now forces that cache to reload after the workspace process is ready.
+- **Cloud workspaces always failed with “Terminal server is unavailable”.** The repository mount's
+  `/openapi.json` request was caught by its read-only write guard, so Open WebUI could never discover
+  its file tools. The mount now publishes a proper read-only OpenAPI schema for listing and reading
+  repository files; edits and commits continue through GitHub MCP.
+
 ## [0.0.20-services.17] - 2026-08-27
 
 ### Fixed

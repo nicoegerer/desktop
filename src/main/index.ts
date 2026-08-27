@@ -2071,7 +2071,7 @@ if (!gotTheLock) {
           await setWorkspaceActive(workspacePath, true)
           sendToRenderer('status:open-terminal', 'started')
           sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
-          const sync = await syncOpenWebUI()
+          const sync = await syncOpenWebUI({ refreshTerminals: true })
           if (sync.status === 'failed') {
             throw new Error('The restored workspace could not be registered in Open WebUI.')
           }
@@ -2150,7 +2150,7 @@ if (!gotTheLock) {
             repoFullName: String(repo.repoFullName),
             branch: String(repo.branch)
           })
-          const sync = await syncOpenWebUI()
+          const sync = await syncOpenWebUI({ refreshTerminals: true })
           if (sync.status === 'failed') {
             throw new Error('The repository could not be registered in Open WebUI.')
           }
@@ -2173,7 +2173,7 @@ if (!gotTheLock) {
         sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
 
         // The chat can only address the terminal once Open WebUI knows it.
-        const sync = await syncOpenWebUI()
+        const sync = await syncOpenWebUI({ refreshTerminals: true })
         if (sync.status === 'failed') {
           throw new Error('The workspace could not be registered in Open WebUI.')
         }
