@@ -62,9 +62,10 @@ interface Harness {
   settle: (rounds?: number) => Promise<void>
   storage: () => Record<string, string>
   renderCount: () => number
+  navigate: (path: string) => void
 }
 
-const run = (seed?: Record<string, unknown>): Harness => {
+const run = (seed?: Record<string, unknown>, initialPath = '/c/chat-123'): Harness => {
   const calls: Array<{ url: string; body: unknown }> = []
   const bridge: Array<Record<string, unknown>> = []
   const store: Record<string, string> = {}
@@ -139,6 +140,7 @@ const run = (seed?: Record<string, unknown>): Harness => {
   row.contains = (node: unknown) => node === other || node === anchor
   ;(row as Record<string, unknown>).parentElement = null
 
+  const pageLocation = { pathname: initialPath }
   const win: Record<string, unknown> = {
     fetch: (url: unknown, init: unknown) => {
       // Mirrors the browser: the real fetch is bound to window and throws when
@@ -166,7 +168,15 @@ const run = (seed?: Record<string, unknown>): Harness => {
         store[k] = v
       }
     },
-    location: { pathname: '/c/chat-123' },
+    location: pageLocation,
+    history: {
+      pushState: (_state: unknown, _title: string, path: string) => {
+        pageLocation.pathname = path
+      },
+      replaceState: (_state: unknown, _title: string, path: string) => {
+        pageLocation.pathname = path
+      }
+    },
     console: { warn: () => {} },
     MutationObserver: class {
       constructor(cb: () => void) {
@@ -181,7 +191,7 @@ const run = (seed?: Record<string, unknown>): Harness => {
   // from a strict-mode module is caught here instead of in the app.
   const boundFetch = win.fetch as (...args: unknown[]) => unknown
   win.fetch = function (this: unknown, ...args: unknown[]) {
-    if (this !== win) throw new TypeError("Illegal invocation")
+    if (this !== win) throw new TypeError('Illegal invocation')
     return boundFetch(...args)
   }
 
@@ -226,6 +236,11 @@ const run = (seed?: Record<string, unknown>): Harness => {
     calls,
     bridge,
     storage: () => store,
+    navigate: (path: string) => {
+      ;(
+        win.history as { pushState: (state: unknown, title: string, path: string) => void }
+      ).pushState(null, '', path)
+    },
     mutate: () => notify(),
     settle: async (rounds = 50) => {
       for (let i = 0; i < rounds; i++) {
@@ -268,6 +283,23 @@ test('a chat request is rewritten without breaking the call', async () => {
 
   const sent = JSON.parse(String(h.calls[0].body))
   assert.deepEqual(sent.tool_ids, ['server:desktop-garmin', 'server:mcp:desktop-github-mcp'])
+})
+
+test('the selected workspace applies to every message in the same conversation', async () => {
+  const h = run({
+    'chat-123': { mode: 'local', terminalId: 'desktop-ws-test', label: 'test' }
+  })
+  const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+
+  for (const content of ['first message', 'second message']) {
+    await detached('/api/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify({ messages: [{ role: 'user', content }] })
+    })
+  }
+
+  assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-ws-test')
+  assert.equal(JSON.parse(String(h.calls[1].body)).terminal_id, 'desktop-ws-test')
 })
 
 test('a request the page makes with no init is passed through', async () => {
@@ -340,6 +372,25 @@ test('the workspace picked before sending survives the chat getting an id', asyn
   const stored = JSON.parse(String(h.storage()['desktop:workspace-selection']))
   assert.ok(!stored.draft, 'the draft slot should have been handed over')
   assert.equal(stored['chat-123'].repoFullName, 'nicoegerer/test1')
+})
+
+test('a workspace on an intermediate new-chat route follows the sent message', async () => {
+  const selected = { mode: 'local', terminalId: 'desktop-ws-test', label: 'test' }
+  const h = run({ new: selected }, '/c/new')
+  const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+
+  await detached('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] })
+  })
+  h.navigate('/c/chat-created-after-send')
+  await h.settle()
+
+  const stored = JSON.parse(String(h.storage()['desktop:workspace-selection']))
+  assert.ok(!stored.new, 'the temporary route must not retain the workspace')
+  assert.deepEqual(stored['chat-created-after-send'], selected)
+  const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
+  assert.deepEqual(keepAlive.at(-1)?.ids, ['desktop-ws-test'])
 })
 
 test('an existing conversation is not overwritten by a leftover draft', async () => {

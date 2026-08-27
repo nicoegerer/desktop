@@ -46,18 +46,31 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var m = /\\/c\\/([^/?#]+)/.exec(location.pathname);
     return m ? m[1] : 'draft';
   };
+  // Injection can finish just after Open WebUI has already changed the URL.
+  // A stored draft is evidence that this first render still needs a handover.
+  var lastChatKey = readAll().draft ? 'draft' : chatKey();
+  var pendingSelection = null;
+  var pendingSourceKey = null;
 
   // Sending the first message turns the draft into a real conversation and the
   // URL gains its id. Without carrying the choice over, the workspace picked
   // before sending would be forgotten the moment it was used.
   var adoptDraft = function () {
     var key = chatKey();
-    if (key === 'draft') return;
+    if (key === lastChatKey) return null;
     var all = readAll();
-    if (all[key] || !all.draft) return;
-    all[key] = all.draft;
-    delete all.draft;
-    writeAll(all);
+    var adopted = null;
+    if (!all[key]) {
+      adopted = pendingSelection || all.draft || null;
+      if (adopted) all[key] = adopted;
+    }
+    if (pendingSourceKey && pendingSourceKey !== key) delete all[pendingSourceKey];
+    if (key !== 'draft') delete all.draft;
+    if (adopted || pendingSourceKey) writeAll(all);
+    lastChatKey = key;
+    pendingSelection = null;
+    pendingSourceKey = null;
+    return adopted;
   };
   var selection = function () { return readAll()[chatKey()] || null; };
 
@@ -82,9 +95,13 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var all = readAll();
     if (value) { all[chatKey()] = value; } else { delete all[chatKey()]; }
     writeAll(all);
+    // Claim a newly started terminal immediately. Driving Open WebUI's menu can
+    // take more than a second; waiting for it used to let an older cleanup
+    // request stop the terminal before the first message reached it.
+    reportLiveWorkspaces();
     // The page has to follow, otherwise the file browser and the terminal panel
     // would keep pointing at whatever was selected before.
-    applySelection(value, reportLiveWorkspaces);
+    applySelection(value);
   };
 
   // ── Request rewriting ───────────────────────────────
@@ -98,6 +115,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         url.indexOf('/api/chat/completions') !== -1 &&
         init && typeof init.body === 'string'
       ) {
+        // Keep the exact selection used for the request. Open WebUI assigns the
+        // permanent conversation id asynchronously after this fetch starts.
+        pendingSelection = selection();
+        pendingSourceKey = chatKey();
         var patched = applyWorkspaceToPayload(JSON.parse(init.body), {
           selection: selection(),
           alwaysOnToolIds: opts.alwaysOnToolIds
@@ -524,7 +545,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var render = function () {
     // The chat id only appears after a pushState, which raises no event, so the
     // handover is checked whenever the page changes.
-    adoptDraft();
+    var adopted = adoptDraft();
     tidyOpenWebUIChrome();
     var row = findRow();
     if (!row) return;
@@ -563,6 +584,12 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     if (chip.title !== title) chip.title = title;
     var opacity = s ? '0.85' : '0.5';
     if (chip.style.opacity !== opacity) chip.style.opacity = opacity;
+    if (adopted) {
+      // A route change rebuilds Open WebUI's composer state. Re-select the
+      // handed-over terminal after the new composer has mounted.
+      setTimeout(function () { applySelection(adopted); }, 0);
+      reportLiveWorkspaces();
+    }
   };
 
   // Rendering mutates the DOM, which the observer would see as new work. The
@@ -580,6 +607,21 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       rendering = false;
     });
   };
+
+  // pushState/replaceState do not emit popstate, and a URL transition does not
+  // always mutate the composer DOM. Observe them explicitly so draft handover
+  // cannot depend on incidental rendering work in Open WebUI.
+  if (window.history) {
+    ['pushState', 'replaceState'].forEach(function (name) {
+      var original = window.history[name];
+      if (typeof original !== 'function') return;
+      window.history[name] = function () {
+        var result = original.apply(window.history, arguments);
+        scheduleRender();
+        return result;
+      };
+    });
+  }
 
   // Everything past the request rewriting is presentation. If any of it throws
   // while wiring up, the page must be left exactly as Open WebUI built it — a

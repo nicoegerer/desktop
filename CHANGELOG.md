@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.15] - 2026-08-27
+
+### Fixed
+
+- **OmniRoute was stopped even though it had started successfully.** The desktop health check used
+  the model-list endpoint, which can remain pending while OmniRoute itself is healthy. It now uses
+  OmniRoute's monitoring health endpoint, and existing saved configurations are migrated
+  automatically.
+- **A workspace could disappear after the first message.** Local folders and cloud repositories are
+  now carried from every temporary new-chat route to the permanent conversation id. The selection
+  remains active for every following message in that conversation.
+- **A newly selected local folder could report “Terminal server not found”.** The terminal is now
+  retained immediately instead of waiting for Open WebUI's workspace menu animation to finish, so
+  cleanup cannot close it before the first request.
+
 ## [0.0.20-services.14] - 2026-08-24
 
 ### Added
