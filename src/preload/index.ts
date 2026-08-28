@@ -180,9 +180,6 @@ const api = {
   validateUrl: (url: string) => ipcRenderer.invoke('validate:url', url),
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
 
-  // Workspaces
-  rememberWorkspace: (workspacePath: string, repoFullName?: string) =>
-    ipcRenderer.invoke('workspace:remember', workspacePath, repoFullName),
   // ── Guest bridge ────────────────────────────────────
   // Called by the script injected into the Open WebUI page. The relay passes
   // the whole request object, so these take one argument and never throw —

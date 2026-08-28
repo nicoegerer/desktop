@@ -79,7 +79,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
    * that, because the selections live per conversation in this store — and a
    * workspace nobody points at keeps a handle on its folder for nothing.
    */
-  var reportLiveWorkspaces = function () {
+  var reportLiveWorkspaces = function (extra) {
     var all = readAll();
     var ids = [];
     for (var key in all) {
@@ -89,19 +89,52 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         ids.push(entry.terminalId);
       }
     }
+    if (extra && extra.terminalId && ids.indexOf(extra.terminalId) === -1) {
+      ids.push(extra.terminalId);
+    }
     ask('workspaceKeepAlive', { ids: ids });
   };
-  var select = function (value) {
+  var saveSelection = function (value) {
     var all = readAll();
     if (value) { all[chatKey()] = value; } else { delete all[chatKey()]; }
     writeAll(all);
-    // Claim a newly started terminal immediately. Driving Open WebUI's menu can
-    // take more than a second; waiting for it used to let an older cleanup
-    // request stop the terminal before the first message reached it.
-    reportLiveWorkspaces();
-    // The page has to follow, otherwise the file browser and the terminal panel
-    // would keep pointing at whatever was selected before.
-    applySelection(value);
+  };
+  var select = function (value) {
+    // Reserve a newly started terminal while the live Open WebUI stores are
+    // updated. Persist and render the chip only after that update succeeds, so
+    // the chip can never claim a workspace while Files still shows another.
+    reportLiveWorkspaces(value);
+    selectionBeingApplied = 'manual:' + chatKey() + ':' + ((value && value.terminalId) || 'none');
+    busy = true;
+    note = t('Arbeitsbereich wird aktiviert …', 'Activating workspace …');
+    renderPanel();
+    ensureWorkspaceReady(value).then(function (ready) {
+      reportLiveWorkspaces(ready);
+      return applySelectionAsync(ready).then(function (ok) {
+        selectionBeingApplied = '';
+        busy = false;
+        if (!ok) {
+          note = t(
+            'Arbeitsbereich konnte nicht in Open WebUI aktiviert werden.',
+            'The workspace could not be activated in Open WebUI.'
+          );
+          reportLiveWorkspaces();
+          renderPanel();
+          return;
+        }
+        saveSelection(ready);
+        appliedSelection = chatKey() + ':' + ((ready && ready.terminalId) || 'none');
+        reportLiveWorkspaces();
+        closePanel();
+        scheduleRender();
+      });
+    }).catch(function (error) {
+      selectionBeingApplied = '';
+      busy = false;
+      note = error && error.message ? error.message : String(error);
+      reportLiveWorkspaces();
+      renderPanel();
+    });
   };
 
   // ── Request rewriting ───────────────────────────────
@@ -121,12 +154,20 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         pendingSourceKey = chatKey();
         var originalBody = JSON.parse(init.body);
         return ensureWorkspaceReady(pendingSelection).then(function (readySelection) {
-          var patched = applyWorkspaceToPayload(originalBody, {
-            selection: readySelection,
-            alwaysOnToolIds: opts.alwaysOnToolIds
+          reportLiveWorkspaces(readySelection);
+          return applySelectionAsync(readySelection).then(function (selectedInComposer) {
+            if (readySelection && readySelection.terminalId && !selectedInComposer) {
+              throw new Error('The selected workspace could not be applied to Open WebUI.');
+            }
+            saveSelection(readySelection);
+            reportLiveWorkspaces();
+            var patched = applyWorkspaceToPayload(originalBody, {
+              selection: readySelection,
+              alwaysOnToolIds: opts.alwaysOnToolIds
+            });
+            var nextInit = Object.assign({}, init, { body: JSON.stringify(patched) });
+            return originalFetch.call(window, input, nextInit);
           });
-          var nextInit = Object.assign({}, init, { body: JSON.stringify(patched) });
-          return originalFetch.call(window, input, nextInit);
         });
       }
     } catch (e) {
@@ -166,12 +207,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         terminalId: result.terminal.id,
         label: result.terminal.name || selected.label
       });
-      var all = readAll();
-      all[chatKey()] = restored;
-      writeAll(all);
       readyTerminals[restored.terminalId] = true;
-      reportLiveWorkspaces();
-      scheduleRender();
       return restored;
     });
     return terminalStarts[requestedId];
@@ -187,6 +223,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent =
+      'html.desktop-hide-terminal-menu [data-desktop-terminal-menu-wrapper],' +
       'html.desktop-hide-terminal-menu [data-desktop-terminal-menu] {' +
       'display:none !important;}' +
       'html.desktop-hide-tool-count button[aria-label="Available Tools"]{display:none !important;}';
@@ -244,44 +281,260 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     panel = null;
   };
 
-  // ── Driving Open WebUI's own selection ──────────────
+  // ── Explicit Open WebUI terminal-store bridge ────────
   //
-  // Which folder a conversation works in lives in a store inside Open WebUI's
-  // bundle, and the file browser and terminal panel read it. Nothing outside
-  // the page can write it, so the chip operates Open WebUI's own terminal menu
-  // instead — its click is the page's click, and everything follows.
-  //
-  // The desktop chip is the only user-facing workspace control. The native
-  // menu remains hidden and is operated internally so there cannot be two
-  // different-looking selections in the composer.
+  // Open WebUI 0.11 keeps the terminal list and selected id in Svelte stores,
+  // but exposes no public setter outside its bundle. The bridge below locates
+  // that already-loaded store module through its shipped source map, imports
+  // the same module instance, refreshes the system terminals through Open
+  // WebUI's API, and updates both stores. No page reload or DOM click is used.
+  // The resolved bridge is deliberately published under a named window key so
+  // the unsupported boundary is explicit, inspectable, and replaceable.
   var selectionBeingApplied = '';
   var appliedSelection = '';
   var selectionApplyAttempts = {};
+  var STORE_BRIDGE_KEY = '__openWebUIDesktopTerminalBridge';
+  var storeBridgePromise = null;
+
+  var readStore = function (store) {
+    var value;
+    var unsubscribe = store.subscribe(function (next) { value = next; });
+    if (typeof unsubscribe === 'function') unsubscribe();
+    return value;
+  };
+
+  var decodeVlq = function (segment) {
+    var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var values = [];
+    var value = 0;
+    var shift = 0;
+    for (var i = 0; i < segment.length; i++) {
+      var digit = alphabet.indexOf(segment.charAt(i));
+      if (digit < 0) continue;
+      var more = digit & 32;
+      value += (digit & 31) << shift;
+      if (more) {
+        shift += 5;
+        continue;
+      }
+      values.push(value & 1 ? -(value >> 1) : value >> 1);
+      value = 0;
+      shift = 0;
+    }
+    return values;
+  };
+
+  var generatedLocalName = function (map, code, sourceIndex, originalName) {
+    var source = 0;
+    var originalLine = 0;
+    var originalColumn = 0;
+    var nameIndex = 0;
+    var mappingLines = String(map.mappings || '').split(';');
+    var generatedLines = String(code || '').split('\\n');
+    for (var lineIndex = 0; lineIndex < mappingLines.length; lineIndex++) {
+      var generatedColumn = 0;
+      var segments = mappingLines[lineIndex].split(',');
+      for (var segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+        if (!segments[segmentIndex]) continue;
+        var fields = decodeVlq(segments[segmentIndex]);
+        generatedColumn += fields[0] || 0;
+        if (fields.length < 4) continue;
+        source += fields[1];
+        originalLine += fields[2];
+        originalColumn += fields[3];
+        if (fields.length < 5) continue;
+        nameIndex += fields[4];
+        if (source !== sourceIndex || map.names[nameIndex] !== originalName) continue;
+        var line = generatedLines[lineIndex] || '';
+        var start = generatedColumn;
+        var end = generatedColumn;
+        while (start > 0 && /[A-Za-z0-9_$]/.test(line.charAt(start - 1))) start--;
+        while (end < line.length && /[A-Za-z0-9_$]/.test(line.charAt(end))) end++;
+        var local = line.slice(start, end);
+        if (local) return local;
+      }
+    }
+    return null;
+  };
+
+  var exportedAlias = function (code, local) {
+    var start = code.lastIndexOf('export{');
+    if (start < 0) return null;
+    var end = code.indexOf('}', start);
+    if (end < 0) return null;
+    var pairs = code.slice(start + 7, end).split(',');
+    for (var i = 0; i < pairs.length; i++) {
+      var sides = pairs[i].trim().split(/\\s+as\\s+/);
+      if (sides[0] === local && sides[1]) return sides[1];
+    }
+    return null;
+  };
+
+  var bridgeFromModule = function (module, aliases) {
+    var terminalServersStore = module[aliases.terminalServers];
+    var selectedTerminalIdStore = module[aliases.selectedTerminalId];
+    var showControlsStore = aliases.showControls ? module[aliases.showControls] : null;
+    if (
+      !terminalServersStore || typeof terminalServersStore.set !== 'function' ||
+      !selectedTerminalIdStore || typeof selectedTerminalIdStore.set !== 'function'
+    ) return null;
+
+    return {
+      select: function (terminalId) {
+        if (!terminalId) {
+          selectedTerminalIdStore.set(null);
+          return Promise.resolve(readStore(selectedTerminalIdStore) === null);
+        }
+        var token = localStorage.getItem('token') || '';
+        return originalFetch.call(window, '/api/v1/terminals/', {
+          headers: token ? { Authorization: 'Bearer ' + token } : {}
+        }).then(function (response) {
+          if (!response || !response.ok) return false;
+          return response.json().then(function (systemTerminals) {
+            if (!Array.isArray(systemTerminals)) return false;
+            if (!systemTerminals.some(function (terminal) { return terminal.id === terminalId; })) {
+              return false;
+            }
+            var current = readStore(terminalServersStore);
+            var direct = Array.isArray(current)
+              ? current.filter(function (terminal) { return !terminal || !terminal.id; })
+              : [];
+            terminalServersStore.set(direct.concat(systemTerminals));
+            selectedTerminalIdStore.set(terminalId);
+            if (showControlsStore && typeof showControlsStore.set === 'function') {
+              showControlsStore.set(true);
+            }
+            return readStore(selectedTerminalIdStore) === terminalId;
+          });
+        });
+      }
+    };
+  };
+
+  var discoverStoreBridge = function () {
+    var existing = window[STORE_BRIDGE_KEY];
+    if (existing && typeof existing.select === 'function') return Promise.resolve(existing);
+    if (storeBridgePromise) return storeBridgePromise;
+
+    storeBridgePromise = Promise.resolve().then(function () {
+      var urls = [];
+      if (window.performance && typeof window.performance.getEntriesByType === 'function') {
+        var resources = window.performance.getEntriesByType('resource');
+        for (var i = 0; i < resources.length; i++) {
+          var url = String(resources[i].name || '');
+          if (url.indexOf('/_app/immutable/') !== -1 && /\\.js(?:\\?|$)/.test(url)) urls.push(url.split('?')[0]);
+        }
+      }
+      var scripts = document.querySelectorAll('script[src]');
+      for (var j = 0; j < scripts.length; j++) {
+        var src = scripts[j].src || scripts[j].getAttribute('src') || '';
+        if (src && /\\.js(?:\\?|$)/.test(src)) urls.push(String(src).split('?')[0]);
+      }
+      urls = urls.filter(function (url, index, all) { return all.indexOf(url) === index; });
+
+      var inspect = function (index) {
+        if (index >= urls.length) return Promise.resolve(null);
+        var moduleUrl = urls[index];
+        return Promise.all([
+          originalFetch.call(window, moduleUrl).then(function (response) {
+            return response.ok ? response.text() : '';
+          }),
+          originalFetch.call(window, moduleUrl + '.map').then(function (response) {
+            return response.ok ? response.json() : null;
+          })
+        ]).then(function (parts) {
+          var code = parts[0];
+          var map = parts[1];
+          if (!code || !map || !Array.isArray(map.sources) || !Array.isArray(map.names)) {
+            return inspect(index + 1);
+          }
+          var sourceIndex = -1;
+          for (var k = 0; k < map.sources.length; k++) {
+            var sourcePath = String(map.sources[k]).split(String.fromCharCode(92)).join('/');
+            if (sourcePath.endsWith('src/lib/stores/index.ts')) {
+              sourceIndex = k;
+              break;
+            }
+          }
+          if (sourceIndex < 0) return inspect(index + 1);
+
+          var names = ['terminalServers', 'selectedTerminalId', 'showControls'];
+          var aliases = {};
+          for (var n = 0; n < names.length; n++) {
+            var local = generatedLocalName(map, code, sourceIndex, names[n]);
+            if (local) aliases[names[n]] = exportedAlias(code, local);
+          }
+          if (!aliases.terminalServers || !aliases.selectedTerminalId) return inspect(index + 1);
+          return import(moduleUrl).then(function (module) {
+            return bridgeFromModule(module, aliases);
+          });
+        }).catch(function () { return inspect(index + 1); });
+      };
+
+      return inspect(0).then(function (bridge) {
+        if (bridge) window[STORE_BRIDGE_KEY] = bridge;
+        return bridge;
+      });
+    });
+    return storeBridgePromise;
+  };
+
+  var selectTerminalInComposer = function (terminalId) {
+    return discoverStoreBridge().then(function (bridge) {
+      return bridge && typeof bridge.select === 'function'
+        ? bridge.select(terminalId || null)
+        : false;
+    }).then(function (ok) { return ok === true; });
+  };
+
+  // The native picker stays hidden. It is identified only by the semantic
+  // tooltip Open WebUI attaches to TerminalMenu; ids belonging to More,
+  // Integrations and Available Tools are rejected explicitly. This function
+  // never clicks anything and is not involved in changing composer state.
+  var terminalMenuTrigger = function (button) {
+    var node = button;
+    while (node) {
+      if (
+        node.getAttribute && node.getAttribute('role') === 'button' &&
+        node.getAttribute('aria-haspopup') === 'true'
+      ) return node;
+      node = node.parentElement;
+    }
+    return null;
+  };
 
   var findTerminalMenuButton = function () {
     var row = findRow();
     if (!row) return null;
     var buttons = row.querySelectorAll('button[type="button"]');
-    var chipBox = chip && chip.isConnected ? chip.getBoundingClientRect() : null;
-    var nearest = null;
-    var nearestGap = Number.MAX_VALUE;
+    var found = null;
     for (var i = 0; i < buttons.length; i++) {
       var b = buttons[i];
       if (b === chip) continue;
-      var cls = b.getAttribute('class') || '';
-      if (cls.indexOf('translate-y-[1px]') !== -1 && cls.indexOf('text-[13px]') !== -1 && b.querySelector('svg')) return b;
-      if (!chipBox || !b.querySelector('svg') || !(b.textContent || '').trim()) continue;
-      var box = b.getBoundingClientRect();
-      var gap = chipBox.left - (box.right || box.left);
-      if (gap >= -2 && gap < nearestGap) { nearest = b; nearestGap = gap; }
+      var id = b.id || (b.getAttribute && b.getAttribute('id')) || '';
+      var aria = (b.getAttribute && b.getAttribute('aria-label')) || '';
+      if (
+        id === 'input-menu-button' || id === 'integration-menu-button' ||
+        aria === 'Available Tools' || aria === 'Integrations' || aria === 'More'
+      ) continue;
+      var tooltip = b.parentElement && b.parentElement._tippy;
+      var content = tooltip && tooltip.props ? tooltip.props.content : '';
+      var semanticName = typeof content === 'string'
+        ? content.replace(/<[^>]*>/g, '').trim()
+        : (content && content.textContent ? String(content.textContent).trim() : '');
+      if (semanticName !== 'Terminal' || !terminalMenuTrigger(b)) continue;
+      if (found) return null;
+      found = b;
     }
-    return nearest;
+    return found;
   };
 
   var markTerminalMenu = function () {
     var button = findTerminalMenuButton();
     if (!button) return null;
     button.setAttribute('data-desktop-terminal-menu', '1');
+    var trigger = terminalMenuTrigger(button);
+    if (trigger) trigger.setAttribute('data-desktop-terminal-menu-wrapper', '1');
     return button;
   };
 
@@ -289,103 +542,46 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     document.documentElement.classList.toggle('desktop-hide-terminal-menu', !!hidden);
   };
 
-  var entryWithText = function (text, skip) {
-    var buttons = document.querySelectorAll('button');
-    for (var i = 0; i < buttons.length; i++) {
-      var b = buttons[i];
-      if (b === chip || b === skip) continue;
-      if ((b.textContent || '').trim() === text) return b;
-    }
-    return null;
-  };
-
-  /**
-   * Select \`wanted\` in Open WebUI's terminal menu, or clear the selection when
-   * it is null. Reports whether the page ended up in the requested state.
-   */
-  var driveSelection = function (wanted, done) {
-    // Our own panel carries entries with the same names, so it is closed first
-    // — otherwise the search below could find one of those instead.
-    closePanel();
-
-    var button = markTerminalMenu();
-    if (!button) { done(false); return; }
-
-    var current = (button.textContent || '').trim();
-    if (wanted && current === wanted) { done(true); return; }
-    if (!wanted && !current) { done(true); return; }
-
-    button.click();
-
-    // The menu content is rendered by the page, so it may take a few frames to
-    // appear. Poll rather than guess a delay.
-    var attempts = 0;
-    var tryPick = function () {
-      // Clearing works by toggling off whatever is selected right now.
-      var target = entryWithText(wanted || current, button);
-      if (target) {
-        target.click();
-        setTimeout(function () {
-          var now = (button.textContent || '').trim();
-          done(wanted ? now === wanted : !now);
-        }, 120);
-        return;
-      }
-      if (++attempts > 20) {
-        button.click(); // leave the menu as we found it
-        done(false);
-        return;
-      }
-      setTimeout(tryPick, 50);
-    };
-    setTimeout(tryPick, 50);
-  };
-
   var applySelection = function (selected, done) {
-    driveSelection(selected && selected.label ? selected.label : null, function (ok) {
+    markTerminalMenu();
+    setMenuHidden(true);
+    selectTerminalInComposer(selected && selected.terminalId).then(function (ok) {
       setMenuHidden(true);
-      if (ok && selected && selected.terminalId) {
-        try { sessionStorage.removeItem('desktop:terminal-reload:' + selected.terminalId); } catch (e) { /* storage unavailable */ }
-      }
-      if (!ok && selected && selected.terminalId) {
-        var reloadKey = 'desktop:terminal-reload:' + selected.terminalId;
-        try {
-          if (!sessionStorage.getItem(reloadKey)) {
-            sessionStorage.setItem(reloadKey, '1');
-            location.reload();
-            return;
-          }
-        } catch (e) { /* storage unavailable */ }
-      }
       scheduleRender();
       if (done) done(ok);
+    }).catch(function (error) {
+      console.warn('[desktop] terminal store bridge:', error);
+      if (done) done(false);
     });
   };
+  var applySelectionAsync = function (selected) {
+    return new Promise(function (resolve) { applySelection(selected, resolve); });
+  };
 
-  // Open WebUI rebuilds its composer store after reloads and route changes.
-  // The desktop selection survives in localStorage, but until it is replayed
-  // into that store the Files panel remains on /mnt/uploads and the model sees
-  // no active terminal. Reconcile once per conversation/terminal combination;
-  // ensureWorkspaceReady also restarts a workspace process after an app launch.
+  // Open WebUI rebuilds its composer state on route changes. Reconcile once per
+  // conversation/terminal combination; ensureWorkspaceReady also restarts a
+  // workspace process after an app launch.
   var reconcileSelection = function (selected) {
-    if (!selected || !selected.terminalId) return;
-    var key = chatKey() + ':' + selected.terminalId;
-    if (selectionBeingApplied === key || appliedSelection === key) return;
-    // Wait for Open WebUI's composer and terminal menu to exist. Its DOM
-    // observer will call render again as each part mounts.
-    if (!findTerminalMenuButton()) return;
+    var selectedId = (selected && selected.terminalId) || '';
+    var key = chatKey() + ':' + (selectedId || 'none');
+    if (selectionBeingApplied || appliedSelection === key) return;
     selectionBeingApplied = key;
     ensureWorkspaceReady(selected).then(function (ready) {
       var current = selection();
-      if (!current || current.terminalId !== selected.terminalId) {
+      var currentId = (current && current.terminalId) || '';
+      if (currentId !== selectedId) {
         selectionBeingApplied = '';
         return;
       }
+      var restoredId = (ready && ready.terminalId) || '';
+      if (restoredId && restoredId !== selectedId) reportLiveWorkspaces(ready);
       applySelection(ready, function (ok) {
         selectionBeingApplied = '';
         if (ok) {
-          appliedSelection = key;
+          saveSelection(ready);
+          appliedSelection = chatKey() + ':' + ((ready && ready.terminalId) || 'none');
           delete selectionApplyAttempts[key];
+          if (restoredId !== selectedId) reportLiveWorkspaces();
           return;
         }
         selectionApplyAttempts[key] = (selectionApplyAttempts[key] || 0) + 1;
@@ -402,21 +598,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     return s.label || t('Lokal', 'Local');
   };
 
-  var button = function (text, onClick, active, icon) {
+  var button = function (text, onClick, active) {
     var b = document.createElement('button');
     b.type = 'button';
-    if (icon) {
-      var slot = document.createElement('span');
-      slot.style.cssText = 'display:inline-flex;flex:0 0 auto;opacity:.65;';
-      slot.innerHTML = icon;
-      var caption = document.createElement('span');
-      caption.style.cssText = 'overflow:hidden;text-overflow:ellipsis;';
-      caption.textContent = text;
-      b.appendChild(slot);
-      b.appendChild(caption);
-    } else {
-      b.textContent = text;
-    }
+    b.textContent = text;
     b.style.cssText =
       'all:unset;box-sizing:border-box;display:flex;align-items:center;gap:7px;width:100%;' +
       'padding:6px 10px;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;' +
@@ -549,7 +734,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
                     label: result.terminal.name
                   });
                 });
-              }, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName, ICON_CLOUD));
+              }, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName));
             });
         };
         search.oninput = paint;
@@ -628,7 +813,6 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     );
   };
   var ICON_FOLDER = svg('<path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.6.8l.9 1.2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>');
-  var ICON_CLOUD = svg('<path d="M7 18a4 4 0 0 1-.4-8 6 6 0 0 1 11.6 1.5A3.5 3.5 0 0 1 17.5 18z"/>');
   var ICON_EMPTY = svg('<path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.6.8l.9 1.2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke-dasharray="3 2"/>');
 
   // Writes only what actually differs. The observer below reacts to DOM
@@ -661,7 +845,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
 
     var s = selection();
     reconcileSelection(s);
-    var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
+    var icon = s ? ICON_FOLDER : ICON_EMPTY;
     if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
     var text = label();
     if (chipLabel.textContent !== text) chipLabel.textContent = text;
@@ -672,10 +856,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var opacity = s ? '0.85' : '0.5';
     if (chip.style.opacity !== opacity) chip.style.opacity = opacity;
     if (adopted) {
-      // A route change rebuilds Open WebUI's composer state. Re-select the
-      // handed-over terminal after the new composer has mounted.
-      setTimeout(function () { applySelection(adopted); }, 0);
-      reportLiveWorkspaces();
+      // The next reconciliation applies the handed-over terminal to the live
+      // stores; keep it reserved while that asynchronous bridge completes.
+      reportLiveWorkspaces(adopted);
     }
   };
 

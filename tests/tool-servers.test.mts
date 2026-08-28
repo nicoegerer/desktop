@@ -4,11 +4,12 @@ import { test } from 'node:test'
 import {
   applyCloudWorkspacePrompt,
   CLOUD_WORKSPACE_MARKER_START,
+  desktopTerminalSelectorName,
   DESKTOP_TOOL_PREFIX,
-  mergeDefaultTools,
   mergeTerminalServers,
   mergeToolServers,
   shouldWriteTerminalServers,
+  stripDesktopDefaultTools,
   type TerminalServerConnection,
   type ToolServerConnection,
   type WorkspaceTerminalTarget
@@ -131,45 +132,22 @@ test('an unchanged registry produces a byte-identical list so no write happens',
   assert.equal(JSON.stringify(first), JSON.stringify(second))
 })
 
-// ─── Default tool selection ─────────────────────────────
+// ─── Invisible always-on connectors ─────────────────────
 
-test('connectors default to on so a new chat can call them without toggling', () => {
-  const merged = mergeDefaultTools(
-    [],
-    [target({ id: 'garmin' }), target({ id: 'github-mcp', kind: 'mcp', path: '' })]
-  )
+test('desktop connectors are removed from visible user tool defaults', () => {
+  const cleaned = stripDesktopDefaultTools([
+    'server:desktop-garmin',
+    'my_python_tool',
+    'server:mcp:desktop-github-mcp',
+    'server:some-other-server'
+  ])
 
-  assert.deepEqual(merged, ['server:desktop-garmin', 'server:mcp:desktop-github-mcp'])
+  assert.deepEqual(cleaned, ['my_python_tool', 'server:some-other-server'])
 })
 
-test('tools the user picked themselves are preserved', () => {
-  const merged = mergeDefaultTools(
-    ['my_python_tool', 'server:some-other-server'],
-    [target({ id: 'garmin' })]
-  )
-
-  assert.deepEqual(merged, ['my_python_tool', 'server:some-other-server', 'server:desktop-garmin'])
-})
-
-test('a disabled connector stops being a default tool', () => {
-  const merged = mergeDefaultTools(
-    ['server:desktop-garmin', 'my_python_tool'],
-    [target({ id: 'garmin', enabled: false })]
-  )
-
-  assert.deepEqual(merged, ['my_python_tool'])
-})
-
-test('a removed connector leaves no dangling tool id behind', () => {
-  const merged = mergeDefaultTools(['server:desktop-garmin', 'server:mcp:desktop-github-mcp'], [])
-
-  assert.deepEqual(merged, [])
-})
-
-test('an unchanged connector set produces an identical selection', () => {
-  const targets = [target({ id: 'garmin' }), target({ id: 'github-mcp', kind: 'mcp', path: '' })]
-  const first = mergeDefaultTools(['my_python_tool'], targets)
-  const second = mergeDefaultTools(first, targets)
+test('cleaning visible connector defaults is idempotent', () => {
+  const first = stripDesktopDefaultTools(['my_python_tool', 'server:desktop-garmin'])
+  const second = stripDesktopDefaultTools(first)
 
   assert.deepEqual(first, second)
 })
@@ -240,7 +218,7 @@ test('a workspace terminal is registered with an id so the chat can select it', 
   // Open WebUI hides system terminals whose id is falsy, so this is the whole
   // reason a workspace shows up in the cloud menu at all.
   assert.equal(merged[0].id, 'desktop-ws-abc123')
-  assert.equal(merged[0].name, 'test1')
+  assert.equal(merged[0].name, desktopTerminalSelectorName('desktop-ws-abc123'))
   assert.equal(merged[0].enabled, true)
   assert.equal(merged[0].path, '/openapi.json')
   assert.equal(merged[0].auth_type, 'bearer')
@@ -258,8 +236,16 @@ test('several workspaces are registered side by side', () => {
   assert.deepEqual(
     merged.map((entry) => [entry.id, entry.name, entry.url]),
     [
-      ['desktop-ws-1', 'test1', 'http://127.0.0.1:39284'],
-      ['desktop-ws-2', 'other', 'http://127.0.0.1:39285']
+      [
+        'desktop-ws-1',
+        desktopTerminalSelectorName('desktop-ws-1'),
+        'http://127.0.0.1:39284'
+      ],
+      [
+        'desktop-ws-2',
+        desktopTerminalSelectorName('desktop-ws-2'),
+        'http://127.0.0.1:39285'
+      ]
     ]
   )
 })

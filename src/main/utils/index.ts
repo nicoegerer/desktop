@@ -846,12 +846,9 @@ export interface AppConfig {
     extraArgs: string[]
   }
   workspaces: {
-    root: string
-    recent: Array<{ path: string; name: string; repoFullName?: string; lastUsedAt: number }>
+    recent: Array<{ path: string; name: string; lastUsedAt: number }>
     /** Workspaces whose terminal is reopened on the next launch. */
     active: string[]
-    /** The GitHub repository worked on without a checkout, if any. */
-    cloud: { repoFullName: string; branch: string } | null
   }
   envVars: Record<string, string>
   showSidebar: boolean
@@ -891,10 +888,8 @@ const DEFAULT_CONFIG: AppConfig = {
     extraArgs: []
   },
   workspaces: {
-    root: '',
     recent: [],
-    active: [],
-    cloud: null
+    active: []
   },
   envVars: {},
   showSidebar: false,
@@ -913,7 +908,19 @@ export const getConfig = async (): Promise<AppConfig> => {
   try {
     if (fs.existsSync(configPath)) {
       const data = await fs.promises.readFile(configPath, 'utf8')
-      return { ...DEFAULT_CONFIG, ...JSON.parse(data) }
+      const saved = JSON.parse(data) as Partial<AppConfig>
+      const savedWorkspaces = saved.workspaces
+      return {
+        ...DEFAULT_CONFIG,
+        ...saved,
+        // Versions before services.23 also stored a checkout root and a
+        // process-wide cloud selection here. Cloud workspaces are now strictly
+        // per-chat read-only mounts, so only local recent/active state survives.
+        workspaces: {
+          recent: Array.isArray(savedWorkspaces?.recent) ? savedWorkspaces.recent : [],
+          active: Array.isArray(savedWorkspaces?.active) ? savedWorkspaces.active : []
+        }
+      }
     }
     return { ...DEFAULT_CONFIG }
   } catch (error) {

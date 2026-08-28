@@ -3,10 +3,10 @@ import log from 'electron-log'
 
 import {
   applyCloudWorkspacePrompt,
-  mergeDefaultTools,
   mergeTerminalServers,
   mergeToolServers,
   shouldWriteTerminalServers,
+  stripDesktopDefaultTools,
   type TerminalServerConnection,
   type ToolServerConnection
 } from '../../shared/services/tool-servers'
@@ -101,16 +101,15 @@ const writeConfig = async (
 }
 
 /**
- * Make the desktop's connectors the default tool selection and declare the
- * cloud workspace, both of which live in the signed-in user's settings.
+ * Remove legacy visible connector defaults and the legacy account-wide cloud
+ * workspace declaration from the signed-in user's settings.
  *
  * Open WebUI replaces the whole settings object on write, so the current one is
  * read and merged rather than patched.
  */
 const syncUserSettings = async (
   baseUrl: string,
-  token: string,
-  targets: ManagedServiceToolTarget[]
+  token: string
 ): Promise<boolean | 'failed'> => {
   const response = await electronNet.fetch(`${baseUrl}/api/v1/users/user/settings`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -125,7 +124,7 @@ const syncUserSettings = async (
   const ui = (settings.ui ?? {}) as Record<string, unknown>
 
   const currentTools = Array.isArray(ui.tools) ? (ui.tools as string[]) : []
-  const nextTools = mergeDefaultTools(currentTools, targets)
+  const nextTools = stripDesktopDefaultTools(currentTools)
   // The cloud workspace is chosen per conversation and travels in the chat
   // request, so an account-wide declaration written by an earlier version is
   // cleaned up here rather than kept in sync.
@@ -184,8 +183,7 @@ export const syncOpenWebUI = async (
       id: mount.id,
       cwd: mount.name,
       url: mount.url,
-      apiKey: mount.apiKey,
-      name: mount.name
+      apiKey: mount.apiKey
     }))
   ]
 
@@ -248,9 +246,10 @@ export const syncOpenWebUI = async (
     wrote = true
   }
 
-  // Registering a connector is only half the job: Open WebUI still has to
-  // select it for a conversation, which is what the user default does.
-  const settingsWritten = await syncUserSettings(baseUrl, token, toolTargets)
+  // Earlier desktop versions put the always-on connectors into Open WebUI's
+  // visible user defaults. Request rewriting now enables them invisibly, so
+  // clean those legacy ids out without touching tools chosen by the user.
+  const settingsWritten = await syncUserSettings(baseUrl, token)
   if (settingsWritten === 'failed') {
     return { status: 'failed', reason: 'user-settings-write', toolServers: 0, terminals: 0 }
   }

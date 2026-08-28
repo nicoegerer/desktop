@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.23] - 2026-08-28
+
+### Fixed
+
+- **Changing the workspace could open the Available Tools or integrations dialog.** The desktop no
+  longer guesses and clicks Open WebUI controls by CSS class, SVG, or screen position. It resolves
+  Open WebUI's live terminal stores and changes them directly while keeping the native terminal
+  selector hidden behind the per-chat workspace chip.
+- **The workspace chip, Files panel, and outgoing message could disagree about the active folder.**
+  Local folders and GitHub mounts are now selected atomically: the exact terminal is registered and
+  applied to the composer before the chat selection is persisted or a request is sent. Saved
+  per-chat selections are restored through the same path without reloading the page.
+- **Desktop-managed connectors appeared as user-selected tools.** Garmin, GitHub, and other managed
+  connectors are removed from visible tool defaults while still being injected into every outgoing
+  request, preserving their always-available behaviour without changing the tool count or opening a
+  popup.
+- **Cloud workspace handling still carried a competing local-checkout implementation.** GitHub
+  repositories now use only the read-only terminal mount for browsing and GitHub MCP for edits,
+  commits, and pushes. The obsolete checkout state and legacy workspace IPC/preload surface were
+  removed. Cloud repository rows are also text-only and the selected repository uses the same
+  workspace-folder marker as a local selection, with no cloud glyph on the left.
+
 ## [0.0.20-services.22] - 2026-08-28
 
 ### Fixed

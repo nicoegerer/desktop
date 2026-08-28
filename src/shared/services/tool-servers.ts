@@ -34,12 +34,7 @@ export interface ToolServerConnection {
 
 export const toolServerInfoId = (serviceId: string): string => `${DESKTOP_TOOL_PREFIX}${serviceId}`
 
-// ─── Default tool selection ─────────────────────────────
-//
-// Open WebUI selects tools per chat. Without a default, a connector is running
-// and registered but stays switched off in every new conversation, which reads
-// as "the model has no access". `settings.ui.tools` is the per-user default the
-// chat falls back to when a model carries no tool list of its own.
+// ─── Invisible always-on connectors ─────────────────────
 
 /**
  * The id Open WebUI uses for a registered connector. OpenAPI servers and native
@@ -55,22 +50,13 @@ const isDesktopToolId = (id: string): boolean =>
   id.startsWith(`server:mcp:${DESKTOP_TOOL_PREFIX}`)
 
 /**
- * Keep every tool the user chose and make the desktop's own connectors default
- * to on. Connectors that are disabled or gone are dropped rather than left
- * behind as ids that resolve to nothing.
+ * Desktop connectors are added to every outgoing request by the guest bridge.
+ * Keeping them in `settings.ui.tools` as well makes Open WebUI count and render
+ * them as user-selected tools, so remove only our ids and preserve everything
+ * the user selected explicitly.
  */
-export const mergeDefaultTools = (
-  current: string[],
-  targets: ManagedServiceToolTarget[]
-): string[] => {
-  const wanted = targets.filter((target) => target.enabled).map(connectorToolId)
-  const kept = current.filter((id) => typeof id === 'string' && !isDesktopToolId(id))
-  const missing = wanted.filter((id) => !current.includes(id))
-
-  // Preserve the user's ordering; only genuinely new connectors are appended.
-  const preserved = current.filter((id) => isDesktopToolId(id) && wanted.includes(id))
-  return [...kept, ...preserved, ...missing].filter((id, index, all) => all.indexOf(id) === index)
-}
+export const stripDesktopDefaultTools = (current: string[]): string[] =>
+  current.filter((id) => typeof id === 'string' && !isDesktopToolId(id))
 
 // ─── Cloud workspace prompt ─────────────────────────────
 
@@ -134,18 +120,24 @@ export interface WorkspaceTerminalTarget {
   cwd: string
   url: string | null
   apiKey: string | null
-  /** Shown in the chat's terminal menu; defaults to the folder name. */
-  name?: string
 }
+
+/**
+ * Open WebUI 0.11 exposes a terminal's id to its Svelte store but only renders
+ * its name in the native picker. The native picker is hidden by the desktop,
+ * so a deterministic internal name gives the guest bridge an exact, unique
+ * menu target without confusing repositories with equally named folders.
+ */
+export const desktopTerminalSelectorName = (id: string): string =>
+  `open-webui-desktop-terminal:${id}`
 
 const terminalEntry = (
   terminal: WorkspaceTerminalTarget,
-  existing: TerminalServerConnection | null,
-  name: string
+  existing: TerminalServerConnection | null
 ): TerminalServerConnection => ({
   ...(existing ?? {}),
   id: terminal.id,
-  name,
+  name: desktopTerminalSelectorName(terminal.id),
   enabled: true,
   url: terminal.url ?? '',
   path: '/openapi.json',
@@ -153,12 +145,6 @@ const terminalEntry = (
   auth_type: 'bearer',
   config: existing?.config ?? null
 })
-
-export const workspaceDisplayName = (cwd: string): string =>
-  cwd
-    .replace(/[\\/]+$/, '')
-    .split(/[\\/]/)
-    .pop() || cwd
 
 /**
  * Replace desktop-owned terminals and keep everything else.
@@ -193,15 +179,13 @@ export const mergeTerminalServers = (
 
     const terminal = managed.get(id)
     if (!terminal) continue // workspace was closed in the desktop app
-    merged.push(terminalEntry(terminal, entry, terminal.name || workspaceDisplayName(terminal.cwd)))
+    merged.push(terminalEntry(terminal, entry))
     applied.add(id)
   }
 
   for (const [id, terminal] of managed) {
     if (!applied.has(id)) {
-      merged.push(
-        terminalEntry(terminal, null, terminal.name || workspaceDisplayName(terminal.cwd))
-      )
+      merged.push(terminalEntry(terminal, null))
     }
   }
 

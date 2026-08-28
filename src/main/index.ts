@@ -105,18 +105,11 @@ import {
 } from './services/open-webui-sync'
 
 import {
-  forgetWorkspace,
-  getCloudWorkspace,
-  getWorkspacesRoot,
-  listGithubBranches,
   listGithubRepositories,
   listWorkspaces,
-  prepareGithubWorkspace,
   rememberWorkspace,
-  setCloudWorkspace,
   setWorkspaceActive
 } from './utils/workspaces'
-import type { CloudWorkspace } from '../shared/services/tool-servers'
 
 import { initUpdater, checkForUpdates, downloadUpdate, installUpdate } from './updater'
 
@@ -2372,54 +2365,6 @@ if (!gotTheLock) {
         properties: ['openDirectory']
       })
       return result.canceled ? null : (result.filePaths[0] ?? null)
-    })
-
-    // ─── Workspaces ───────────────────────────────────
-    ipcMain.handle('workspace:list', () => listWorkspaces())
-    ipcMain.handle('workspace:root', () => getWorkspacesRoot())
-    ipcMain.handle('workspace:remember', (_event, workspacePath: string, repoFullName?: string) =>
-      rememberWorkspace(workspacePath, repoFullName)
-    )
-    ipcMain.handle('workspace:forget', (_event, workspacePath: string) =>
-      forgetWorkspace(workspacePath)
-    )
-
-    ipcMain.handle('workspace:github:status', () => {
-      const token = getManagedServicesManager()?.getGithubAccessToken() ?? null
-      return { connected: !!token }
-    })
-
-    ipcMain.handle('workspace:github:repos', async () => {
-      const token = getManagedServicesManager()?.getGithubAccessToken()
-      if (!token) {
-        throw new Error(
-          'No GitHub connector is configured. Add GitHub MCP under Settings → Services & Connectors first.'
-        )
-      }
-      return listGithubRepositories(token)
-    })
-
-    ipcMain.handle('workspace:github:branches', async (_event, fullName: string) => {
-      const token = getManagedServicesManager()?.getGithubAccessToken()
-      if (!token) {
-        throw new Error(
-          'No GitHub connector is configured. Add GitHub MCP under Settings → Services & Connectors first.'
-        )
-      }
-      return listGithubBranches(token, String(fullName ?? ''))
-    })
-
-    ipcMain.handle('workspace:github:prepare', async (_event, fullName: string) => {
-      const token = getManagedServicesManager()?.getGithubAccessToken()
-      if (!token) {
-        throw new Error(
-          'No GitHub connector is configured. Add GitHub MCP under Settings → Services & Connectors first.'
-        )
-      }
-      if (typeof fullName !== 'string') throw new Error('A repository name is required')
-      return prepareGithubWorkspace(token, fullName, (status) =>
-        sendToRenderer('status:workspace', status)
-      )
     })
 
     ipcMain.handle('app:launchAtLogin:get', () => {

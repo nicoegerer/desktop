@@ -22,7 +22,29 @@ test('the payload rewriter survives being injected as text', () => {
   // `applyWorkspaceToPayload` is embedded via toString(); a reference to an
   // import would compile here and fail only inside the page.
   assert.ok(source.includes('function applyWorkspaceToPayload'))
-  assert.ok(!/\bchat_payload_1\b|\bimport\b/.test(source))
+  assert.ok(!/\bchat_payload_1\b/.test(source))
+})
+
+test('workspace switching never reloads the embedded page', () => {
+  assert.ok(!script().includes('location.reload'))
+})
+
+test('the terminal control has no positional, CSS-class, or SVG heuristic', () => {
+  const source = script()
+
+  assert.ok(source.includes("semanticName !== 'Terminal'"))
+  assert.ok(!source.includes('nearestGap'))
+  assert.ok(!source.includes('getBoundingClientRect();\n      var gap'))
+  assert.ok(!source.includes("querySelector('svg')"))
+  assert.ok(!source.includes("cls.indexOf('translate-y"))
+})
+
+test('cloud repository rows stay text-only', () => {
+  const source = script()
+
+  assert.ok(source.includes("results.appendChild(button(r.fullName"))
+  assert.ok(source.includes('var icon = s ? ICON_FOLDER : ICON_EMPTY'))
+  assert.ok(!source.includes('ICON_CLOUD'))
 })
 
 test('the connectors and hidden names are embedded', () => {
@@ -63,6 +85,8 @@ interface Harness {
   storage: () => Record<string, string>
   renderCount: () => number
   navigate: (path: string) => void
+  selectedTerminalId: () => string | null
+  nativeClicks: () => { terminal: number; tools: number; integrations: number; globe: number }
 }
 
 const run = (
@@ -77,6 +101,8 @@ const run = (
   let frames: Array<() => void> = []
   let observerCallback: (() => void) | null = null
   let renders = 0
+  let selectedTerminalId: string | null = null
+  const nativeClicks = { terminal: 0, tools: 0, integrations: 0, globe: 0 }
   // A real MutationObserver delivers as a microtask, so a runaway render shows
   // up as an unbounded chain of callbacks rather than a stack overflow.
   let queued = 0
@@ -93,6 +119,7 @@ const run = (
 
   const element = (): Record<string, unknown> => {
     let text = ''
+    const attributes: Record<string, string> = {}
     const node: Record<string, unknown> = {
       style: { cssText: '', opacity: '', background: '' },
       dataset: {},
@@ -100,8 +127,9 @@ const run = (
       isConnected: true,
       children: [] as unknown[],
       classList: { toggle: () => {}, add: () => {}, remove: () => {} },
-      getAttribute: () => null,
+      getAttribute: (name: string) => attributes[name] ?? null,
       setAttribute: (name: string, value: string) => {
+        attributes[name] = value
         if (name === 'id') byId.set(value, node)
       },
       querySelector: () => null,
@@ -114,14 +142,18 @@ const run = (
         notify()
       },
       removeChild: () => {},
-      getBoundingClientRect: () => ({ left: 0, top: 0 })
+      getBoundingClientRect: () => ({ left: 0, top: 0 }),
+      click: () => {}
     }
     // Elements the script injects must be findable afterwards, or a
     // create-if-missing helper would recreate them on every pass and the test
     // would blame the script for the stub's forgetfulness.
     Object.defineProperty(node, 'id', {
-      get: () => '',
-      set: (value: string) => byId.set(value, node)
+      get: () => attributes.id ?? '',
+      set: (value: string) => {
+        attributes.id = value
+        byId.set(value, node)
+      }
     })
     // Assigning textContent replaces the element's text node, which a
     // childList observer reports — that is what turned an unconditional write
@@ -140,8 +172,33 @@ const run = (
   const row = element()
   const anchor = element()
   const other = element()
+  const tools = element()
+  const globe = element()
+  const terminal = element()
+  const terminalTooltip = element()
+  const terminalTrigger = element()
+  anchor.id = 'input-menu-button'
+  other.id = 'integration-menu-button'
+  tools.setAttribute('aria-label', 'Available Tools')
+  globe.setAttribute('aria-label', 'Web Search')
+  terminalTrigger.setAttribute('role', 'button')
+  terminalTrigger.setAttribute('aria-haspopup', 'true')
+  terminal.parentElement = terminalTooltip
+  terminalTooltip.parentElement = terminalTrigger
+  terminalTooltip._tippy = { props: { content: 'Terminal' } }
+  terminalTrigger.parentElement = row
+  terminal.click = () => nativeClicks.terminal++
+  tools.click = () => nativeClicks.tools++
+  other.click = () => nativeClicks.integrations++
+  globe.click = () => nativeClicks.globe++
   anchor.parentElement = row
-  row.contains = (node: unknown) => node === other || node === anchor
+  other.parentElement = row
+  tools.parentElement = row
+  globe.parentElement = row
+  row.contains = (node: unknown) =>
+    node === other || node === anchor || node === tools || node === globe || node === terminal
+  row.querySelectorAll = (selector: string) =>
+    selector === 'button[type="button"]' ? [anchor, other, tools, globe, terminal] : []
   ;(row as Record<string, unknown>).parentElement = null
 
   const pageLocation = { pathname: initialPath }
@@ -154,6 +211,12 @@ const run = (
       return Promise.resolve({ ok: true })
     },
     addEventListener: () => {},
+    __openWebUIDesktopTerminalBridge: {
+      select: (terminalId: string | null) => {
+        selectedTerminalId = terminalId
+        return Promise.resolve(true)
+      }
+    },
     electronAPI: {
       send: (data: Record<string, unknown>) => {
         bridge.push(data)
@@ -213,7 +276,8 @@ const run = (
         : id === 'integration-menu-button'
           ? other
           : (byId.get(id) ?? null),
-    querySelector: () => null,
+    querySelector: (selector: string) =>
+      selector === 'button[aria-label="Available Tools"]' ? tools : null,
     querySelectorAll: () => [] as unknown[]
   }
 
@@ -263,7 +327,9 @@ const run = (
         due.forEach((f) => f())
       }
     },
-    renderCount: () => renders
+    renderCount: () => renders,
+    selectedTerminalId: () => selectedTerminalId,
+    nativeClicks: () => ({ ...nativeClicks })
   }
 }
 
@@ -306,6 +372,30 @@ test('the selected workspace applies to every message in the same conversation',
 
   assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-ws-test')
   assert.equal(JSON.parse(String(h.calls[1].body)).terminal_id, 'desktop-ws-test')
+  assert.equal(h.selectedTerminalId(), 'desktop-ws-test')
+})
+
+test('the workspace bridge never clicks tools, integrations, globe, or the native terminal menu', async () => {
+  const h = run({
+    'chat-123': { mode: 'local', terminalId: 'desktop-ws-test', label: 'test' }
+  })
+  const detached = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+
+  await detached('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'inspect workspace' }] })
+  })
+
+  assert.deepEqual(h.nativeClicks(), { terminal: 0, tools: 0, integrations: 0, globe: 0 })
+})
+
+test('a workspace change cannot open the available-tools dialog', async () => {
+  const h = run({
+    'chat-123': { mode: 'cloud', terminalId: 'desktop-gh-test', label: 'repo' }
+  })
+  await h.settle()
+
+  assert.equal(h.nativeClicks().tools, 0)
 })
 
 test('a saved local workspace is restored before the chat request is sent', async () => {
@@ -331,6 +421,7 @@ test('a saved local workspace is restored before the chat request is sent', asyn
 
   assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-ws-restored')
   assert.equal(JSON.parse(String(h.calls[1].body)).terminal_id, 'desktop-ws-restored')
+  assert.equal(h.selectedTerminalId(), 'desktop-ws-restored')
   assert.equal(h.bridge.filter((call) => call.type === 'workspaceEnsure').length, 1)
 })
 
@@ -356,6 +447,8 @@ test('a saved cloud workspace is remounted before the chat request is sent', asy
   })
 
   assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-gh-restored')
+  assert.equal(h.selectedTerminalId(), 'desktop-gh-restored')
+  assert.notEqual(h.selectedTerminalId(), 'desktop-ws-desktop')
   const mounts = h.bridge.filter((call) => call.type === 'workspaceMountRepo')
   assert.equal(mounts.length, 1)
   assert.equal(mounts[0].repoFullName, 'nicoegerer/test1')
@@ -424,7 +517,14 @@ test('the same folder used by two conversations is reported once', async () => {
 // ─── A draft becoming a real conversation ───────────────
 
 test('the workspace picked before sending survives the chat getting an id', async () => {
-  const h = run({ draft: { mode: 'cloud', repoFullName: 'nicoegerer/test1', branch: 'main' } })
+  const h = run({
+    draft: {
+      mode: 'cloud',
+      repoFullName: 'nicoegerer/test1',
+      branch: 'main',
+      terminalId: 'desktop-gh-draft'
+    }
+  })
   // The harness starts on /c/chat-123, which is what Open WebUI navigates to
   // once the first message creates the conversation.
   await h.settle()
@@ -432,6 +532,7 @@ test('the workspace picked before sending survives the chat getting an id', asyn
   const stored = JSON.parse(String(h.storage()['desktop:workspace-selection']))
   assert.ok(!stored.draft, 'the draft slot should have been handed over')
   assert.equal(stored['chat-123'].repoFullName, 'nicoegerer/test1')
+  assert.equal(h.selectedTerminalId(), 'desktop-gh-draft')
 })
 
 test('a workspace on an intermediate new-chat route follows the sent message', async () => {

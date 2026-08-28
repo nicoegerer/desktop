@@ -1,20 +1,15 @@
-import { spawn } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 
 import { net as electronNet } from 'electron'
-import log from 'electron-log'
 
 import { getConfig, setConfig, type AppConfig } from './index'
-import type { CloudWorkspace } from '../../shared/services/tool-servers'
 
 // ─── Types ──────────────────────────────────────────────
 
 export interface WorkspaceEntry {
   path: string
   name: string
-  repoFullName?: string
   lastUsedAt: number
 }
 
@@ -25,20 +20,10 @@ export interface GithubRepoEntry {
   isPrivate: boolean
   defaultBranch: string
   updatedAt: string
-  localPath: string | null
 }
 
 const MAX_RECENT_WORKSPACES = 12
 const GITHUB_API = 'https://api.github.com'
-const CLONE_TIMEOUT_MS = 10 * 60 * 1000
-
-// ─── Paths ──────────────────────────────────────────────
-
-export const getWorkspacesRoot = async (): Promise<string> => {
-  const config = await getConfig()
-  const configured = config.workspaces?.root?.trim()
-  return configured || path.join(os.homedir(), 'OpenWebUI Workspaces')
-}
 
 const comparablePath = (value: string): string => {
   const normalized = path.normalize(value.trim()).replace(/[\\/]+$/, '')
@@ -48,7 +33,13 @@ const comparablePath = (value: string): string => {
 // ─── Recent workspaces ──────────────────────────────────
 
 const readRecent = (config: AppConfig): WorkspaceEntry[] =>
-  Array.isArray(config.workspaces?.recent) ? config.workspaces.recent : []
+  Array.isArray(config.workspaces?.recent)
+    ? config.workspaces.recent.map((entry) => ({
+        path: entry.path,
+        name: entry.name,
+        lastUsedAt: entry.lastUsedAt
+      }))
+    : []
 
 /**
  * Recently used workspaces, newest first. Folders that were deleted or moved
@@ -66,20 +57,13 @@ export const listWorkspaces = async (): Promise<WorkspaceEntry[]> => {
   return alive.sort((a, b) => b.lastUsedAt - a.lastUsedAt).slice(0, MAX_RECENT_WORKSPACES)
 }
 
-export const rememberWorkspace = async (
-  workspacePath: string,
-  repoFullName?: string
-): Promise<WorkspaceEntry[]> => {
+export const rememberWorkspace = async (workspacePath: string): Promise<WorkspaceEntry[]> => {
   const config = await getConfig()
   const key = comparablePath(workspacePath)
-  const previous = readRecent(config).find((entry) => comparablePath(entry.path) === key)
 
   const entry: WorkspaceEntry = {
     path: path.normalize(workspacePath),
     name: path.basename(path.normalize(workspacePath)) || workspacePath,
-    ...(repoFullName || previous?.repoFullName
-      ? { repoFullName: repoFullName ?? previous?.repoFullName }
-      : {}),
     lastUsedAt: Date.now()
   }
 
@@ -112,38 +96,6 @@ export const setWorkspaceActive = async (
   return next
 }
 
-export const forgetWorkspace = async (workspacePath: string): Promise<WorkspaceEntry[]> => {
-  const config = await getConfig()
-  const key = comparablePath(workspacePath)
-  const recent = readRecent(config).filter((entry) => comparablePath(entry.path) !== key)
-  await setConfig({ workspaces: { ...(config.workspaces ?? {}), recent } } as Partial<AppConfig>)
-  return recent
-}
-
-// ─── Cloud workspace ────────────────────────────────────
-//
-// A cloud workspace has no checkout: the model works through the GitHub
-// connector instead of a terminal. It is stored so the choice survives a
-// restart and can be re-declared in the system prompt.
-
-export const getCloudWorkspace = async (): Promise<CloudWorkspace | null> => {
-  const config = await getConfig()
-  const cloud = config.workspaces?.cloud
-  return cloud?.repoFullName && cloud?.branch
-    ? { repoFullName: cloud.repoFullName, branch: cloud.branch }
-    : null
-}
-
-export const setCloudWorkspace = async (
-  workspace: CloudWorkspace | null
-): Promise<CloudWorkspace | null> => {
-  const config = await getConfig()
-  await setConfig({
-    workspaces: { ...(config.workspaces ?? {}), cloud: workspace }
-  } as Partial<AppConfig>)
-  return workspace
-}
-
 // ─── GitHub ─────────────────────────────────────────────
 
 const githubRequest = async (token: string, urlPath: string): Promise<unknown> => {
@@ -168,23 +120,12 @@ const githubRequest = async (token: string, urlPath: string): Promise<unknown> =
   return response.json()
 }
 
-/** Branches of a repository, so a cloud workspace can target one explicitly. */
-export const listGithubBranches = async (token: string, fullName: string): Promise<string[]> => {
-  const branches = (await githubRequest(
-    token,
-    `/repos/${fullName}/branches?per_page=100`
-  )) as Array<Record<string, unknown>>
-  if (!Array.isArray(branches)) return []
-  return branches.map((branch) => String(branch.name ?? '')).filter(Boolean)
-}
-
 /**
- * Repositories the connector token can reach, newest activity first. Each entry
- * reports whether a local clone already exists so the picker can offer "open"
- * instead of "clone".
+ * Repositories the connector token can reach, newest activity first. Cloud
+ * entries deliberately contain no local path: browsing uses the read-only
+ * GitHub terminal mount and writes go through GitHub MCP.
  */
 export const listGithubRepositories = async (token: string): Promise<GithubRepoEntry[]> => {
-  const root = await getWorkspacesRoot()
   const repositories: GithubRepoEntry[] = []
 
   for (let page = 1; page <= 4; page++) {
@@ -197,13 +138,6 @@ export const listGithubRepositories = async (token: string): Promise<GithubRepoE
     for (const repo of batch) {
       const fullName = String(repo.full_name ?? '')
       if (!fullName.includes('/')) continue
-      const candidate = path.join(root, String(repo.name ?? ''))
-      let localPath: string | null = null
-      try {
-        localPath = fs.statSync(path.join(candidate, '.git')).isDirectory() ? candidate : null
-      } catch {
-        localPath = null
-      }
 
       repositories.push({
         fullName,
@@ -211,8 +145,7 @@ export const listGithubRepositories = async (token: string): Promise<GithubRepoE
         owner: fullName.split('/')[0],
         isPrivate: Boolean(repo.private),
         defaultBranch: String(repo.default_branch ?? 'main'),
-        updatedAt: String(repo.updated_at ?? ''),
-        localPath
+        updatedAt: String(repo.updated_at ?? '')
       })
     }
 
@@ -220,104 +153,4 @@ export const listGithubRepositories = async (token: string): Promise<GithubRepoE
   }
 
   return repositories
-}
-
-// ─── git ────────────────────────────────────────────────
-
-const runGit = (
-  args: string[],
-  options: { cwd?: string; token?: string } = {}
-): Promise<{ code: number; output: string }> =>
-  new Promise((resolve, reject) => {
-    // The token travels in the environment, never in argv, so it stays out of
-    // the process list and out of git's own logging.
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-    if (options.token) {
-      const basic = Buffer.from(`x-access-token:${options.token}`).toString('base64')
-      env.GIT_CONFIG_COUNT = '1'
-      env.GIT_CONFIG_KEY_0 = 'http.extraheader'
-      env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${basic}`
-    }
-
-    const child = spawn('git', args, { cwd: options.cwd, env, shell: false })
-    let output = ''
-    const capture = (chunk: Buffer): void => {
-      output += chunk.toString()
-      if (output.length > 64_000) output = output.slice(-64_000)
-    }
-
-    child.stdout?.on('data', capture)
-    child.stderr?.on('data', capture)
-
-    const timer = setTimeout(() => {
-      child.kill()
-      reject(new Error('git timed out'))
-    }, CLONE_TIMEOUT_MS)
-
-    child.on('error', (error) => {
-      clearTimeout(timer)
-      reject(
-        error.message.includes('ENOENT')
-          ? new Error('git was not found. Install Git and make sure it is on PATH.')
-          : error
-      )
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({ code: code ?? -1, output })
-    })
-  })
-
-const assertRepoFullName = (fullName: string): string => {
-  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(fullName)) {
-    throw new Error(`Invalid repository name: ${fullName}`)
-  }
-  return fullName
-}
-
-/**
- * Clone a repository into the workspaces root, or fast-forward an existing
- * clone. Returns the local path that the workspace should switch to.
- */
-export const prepareGithubWorkspace = async (
-  token: string,
-  fullName: string,
-  onStatus?: (status: string) => void
-): Promise<{ path: string; action: 'cloned' | 'updated' | 'unchanged' }> => {
-  assertRepoFullName(fullName)
-  const root = await getWorkspacesRoot()
-  await fs.promises.mkdir(root, { recursive: true })
-
-  const repoName = fullName.split('/')[1]
-  const target = path.join(root, repoName)
-  const alreadyCloned = fs.existsSync(path.join(target, '.git'))
-
-  if (!alreadyCloned) {
-    if (fs.existsSync(target) && (await fs.promises.readdir(target)).length > 0) {
-      throw new Error(`${target} already exists and is not a git checkout.`)
-    }
-    onStatus?.(`Cloning ${fullName}…`)
-    const result = await runGit(
-      ['clone', '--progress', `https://github.com/${fullName}.git`, target],
-      { token }
-    )
-    if (result.code !== 0) {
-      throw new Error(`git clone failed: ${result.output.trim().split('\n').pop() ?? ''}`)
-    }
-    await rememberWorkspace(target, fullName)
-    return { path: target, action: 'cloned' }
-  }
-
-  onStatus?.(`Updating ${fullName}…`)
-  const status = await runGit(['status', '--porcelain'], { cwd: target })
-  if (status.code === 0 && status.output.trim()) {
-    // Uncommitted work would be at risk in a pull, so open the checkout as-is.
-    log.info(`Workspace ${target} has local changes; skipping fetch`)
-    await rememberWorkspace(target, fullName)
-    return { path: target, action: 'unchanged' }
-  }
-
-  const pull = await runGit(['pull', '--ff-only'], { cwd: target, token })
-  await rememberWorkspace(target, fullName)
-  return { path: target, action: pull.code === 0 ? 'updated' : 'unchanged' }
 }
