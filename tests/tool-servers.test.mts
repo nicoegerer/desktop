@@ -10,6 +10,8 @@ import {
   mergeToolServers,
   shouldWriteTerminalServers,
   stripDesktopDefaultTools,
+  workspaceTerminalToolTarget,
+  workspaceToolId,
   type TerminalServerConnection,
   type ToolServerConnection,
   type WorkspaceTerminalTarget
@@ -208,6 +210,23 @@ const workspace = (
   ...overrides
 })
 
+test('a local workspace has a matching invisible OpenAPI tool server', () => {
+  const terminal = workspace({
+    id: 'desktop-ws-abc123',
+    cwd: 'C:\\Users\\me\\projects\\test1'
+  })
+  const toolTarget = workspaceTerminalToolTarget(terminal)
+  const merged = mergeToolServers([], [toolTarget])
+
+  assert.equal(workspaceToolId(terminal.id), 'server:desktop-workspace-desktop-ws-abc123')
+  assert.equal(merged[0].info?.id, 'desktop-workspace-desktop-ws-abc123')
+  assert.equal(merged[0].type, 'openapi')
+  assert.equal(merged[0].url, terminal.url)
+  assert.equal(merged[0].path, 'openapi.json')
+  assert.equal(merged[0].key, terminal.apiKey)
+  assert.equal(merged[0].config?.enable, true)
+})
+
 test('a workspace terminal is registered with an id so the chat can select it', () => {
   const merged = mergeTerminalServers(
     [],
@@ -236,16 +255,8 @@ test('several workspaces are registered side by side', () => {
   assert.deepEqual(
     merged.map((entry) => [entry.id, entry.name, entry.url]),
     [
-      [
-        'desktop-ws-1',
-        desktopTerminalSelectorName('desktop-ws-1'),
-        'http://127.0.0.1:39284'
-      ],
-      [
-        'desktop-ws-2',
-        desktopTerminalSelectorName('desktop-ws-2'),
-        'http://127.0.0.1:39285'
-      ]
+      ['desktop-ws-1', desktopTerminalSelectorName('desktop-ws-1'), 'http://127.0.0.1:39284'],
+      ['desktop-ws-2', desktopTerminalSelectorName('desktop-ws-2'), 'http://127.0.0.1:39285']
     ]
   )
 })

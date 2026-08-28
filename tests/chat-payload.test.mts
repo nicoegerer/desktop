@@ -60,6 +60,7 @@ test('a local workspace sets the terminal for this request', () => {
   )
 
   assert.equal(out.terminal_id, 'desktop-ws-abc123')
+  assert.deepEqual(out.tool_ids, [...CONNECTORS, 'server:desktop-workspace-desktop-ws-abc123'])
   assert.ok(
     (out.messages as Array<Record<string, string>>).some((message) =>
       message.content.includes('[desktop-local-workspace]')
@@ -92,6 +93,16 @@ test('a local workspace overrides a terminal Open WebUI had selected', () => {
   assert.equal(out.terminal_id, 'desktop-ws-abc123')
 })
 
+test('the local workspace tool server is never added twice', () => {
+  const workspaceToolId = 'server:desktop-workspace-desktop-ws-abc123'
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: [workspaceToolId] },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-abc123' } })
+  )
+
+  assert.equal((out.tool_ids as string[]).filter((id) => id === workspaceToolId).length, 1)
+})
+
 // ─── Cloud workspace ────────────────────────────────────
 
 test('a cloud workspace names the repository and keeps its mounted terminal', () => {
@@ -108,6 +119,7 @@ test('a cloud workspace names the repository and keeps its mounted terminal', ()
   )
 
   assert.equal(out.terminal_id, 'desktop-gh-test1')
+  assert.ok(!(out.tool_ids as string[]).some((id) => id.startsWith('server:desktop-workspace-')))
   const messages = out.messages as Array<Record<string, string>>
   assert.equal(messages[0].role, 'system')
   assert.ok(messages[0].content.includes('nicoegerer/test1'))

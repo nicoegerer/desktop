@@ -131,6 +131,31 @@ export interface WorkspaceTerminalTarget {
 export const desktopTerminalSelectorName = (id: string): string =>
   `open-webui-desktop-terminal:${id}`
 
+/**
+ * Local workspaces are registered through both Open WebUI integration paths:
+ * as a terminal (Files panel and terminal UI) and as an invisible OpenAPI tool
+ * server (model tool calling). Some Open WebUI/model combinations accept a
+ * `terminal_id` but still omit the terminal functions; the normal tool-server
+ * path keeps file and shell access available in that case.
+ */
+export const workspaceToolTargetId = (terminalId: string): string => `workspace-${terminalId}`
+
+export const workspaceToolId = (terminalId: string): string =>
+  `server:${toolServerInfoId(workspaceToolTargetId(terminalId))}`
+
+export const workspaceTerminalToolTarget = (
+  terminal: WorkspaceTerminalTarget
+): ManagedServiceToolTarget => ({
+  id: workspaceToolTargetId(terminal.id),
+  name: `Open Terminal · ${terminal.cwd}`,
+  kind: 'openapi',
+  url: terminal.url ?? '',
+  path: 'openapi.json',
+  key: terminal.apiKey ?? '',
+  enabled: Boolean(terminal.url),
+  ready: Boolean(terminal.url)
+})
+
 const terminalEntry = (
   terminal: WorkspaceTerminalTarget,
   existing: TerminalServerConnection | null

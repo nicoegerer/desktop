@@ -74,9 +74,10 @@ slot and keeps its workspace once it gets an id.
 Pick **Lokal → Ordner öffnen …** for a native folder dialog; any folder on the machine works, it does
 not have to be below a particular root. The desktop starts an Open Terminal instance for it, registers
 it as a terminal server named after the folder with a stable id of `desktop-ws-<hash>`, and the chip
-stores that id for the conversation. Every request from that chat then carries `terminal_id`, so a
-tool-capable model can create and edit files, run commands, use Git, install dependencies, and
-execute builds and tests there.
+stores that id for the conversation. The same instance is registered as a hidden OpenAPI tool server.
+Every request from that chat carries both `terminal_id` and the matching workspace tool id, so a
+tool-capable model can create and edit files, run commands, use Git, install dependencies, and execute
+builds and tests there even when Open WebUI omits its special terminal tools for that model.
 
 Several folders can be open at once — one terminal each — and they are reopened on the next launch.
 

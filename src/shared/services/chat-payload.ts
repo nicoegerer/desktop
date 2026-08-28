@@ -39,6 +39,7 @@ export function applyWorkspaceToPayload(
   const next: Record<string, unknown> = { ...body }
   const marker = '[desktop-cloud-workspace]'
   const localMarker = '[desktop-local-workspace]'
+  const selection = patch ? patch.selection : null
 
   if (next.model_item && typeof next.model_item === 'object') {
     const modelItem = next.model_item as Record<string, unknown>
@@ -65,11 +66,13 @@ export function applyWorkspaceToPayload(
   for (const id of alwaysOn) {
     if (typeof id === 'string' && id && toolIds.indexOf(id) === -1) toolIds.push(id)
   }
+  if (selection?.mode === 'local' && selection.terminalId) {
+    const workspaceToolId = `server:desktop-workspace-${selection.terminalId}`
+    if (toolIds.indexOf(workspaceToolId) === -1) toolIds.push(workspaceToolId)
+  }
   if (toolIds.length > 0) next.tool_ids = toolIds
 
   // ── Workspace ──────────────────────────────────────
-  const selection = patch ? patch.selection : null
-
   // Drop an instruction left over from an earlier turn before adding the
   // current one, so switching workspaces mid-chat cannot stack them.
   const messages = Array.isArray(next.messages)

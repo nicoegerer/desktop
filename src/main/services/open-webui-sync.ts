@@ -7,6 +7,7 @@ import {
   mergeToolServers,
   shouldWriteTerminalServers,
   stripDesktopDefaultTools,
+  workspaceTerminalToolTarget,
   type TerminalServerConnection,
   type ToolServerConnection
 } from '../../shared/services/tool-servers'
@@ -107,10 +108,7 @@ const writeConfig = async (
  * Open WebUI replaces the whole settings object on write, so the current one is
  * read and merged rather than patched.
  */
-const syncUserSettings = async (
-  baseUrl: string,
-  token: string
-): Promise<boolean | 'failed'> => {
+const syncUserSettings = async (baseUrl: string, token: string): Promise<boolean | 'failed'> => {
   const response = await electronNet.fetch(`${baseUrl}/api/v1/users/user/settings`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(15_000)
@@ -167,25 +165,25 @@ export const syncOpenWebUI = async (
     return { status: 'skipped', reason: 'not-signed-in', toolServers: 0, terminals: 0 }
   }
 
-  const toolTargets = context.listToolTargets()
+  const connectorTargets = context.listToolTargets()
   // A local folder and a mounted GitHub repository are both terminal servers as
   // far as Open WebUI is concerned; only what backs them differs.
-  const terminals = [
-    ...listWorkspaceTerminals()
-      .filter((terminal) => terminal.status === 'started' && terminal.url)
-      .map((terminal) => ({
-        id: terminal.id,
-        cwd: terminal.cwd,
-        url: terminal.url,
-        apiKey: terminal.apiKey
-      })),
-    ...listGithubMounts().map((mount) => ({
-      id: mount.id,
-      cwd: mount.name,
-      url: mount.url,
-      apiKey: mount.apiKey
+  const localTerminals = listWorkspaceTerminals()
+    .filter((terminal) => terminal.status === 'started' && terminal.url)
+    .map((terminal) => ({
+      id: terminal.id,
+      cwd: terminal.cwd,
+      url: terminal.url,
+      apiKey: terminal.apiKey
     }))
-  ]
+  const cloudTerminals = listGithubMounts().map((mount) => ({
+    id: mount.id,
+    cwd: mount.name,
+    url: mount.url,
+    apiKey: mount.apiKey
+  }))
+  const terminals = [...localTerminals, ...cloudTerminals]
+  const toolTargets = [...connectorTargets, ...localTerminals.map(workspaceTerminalToolTarget)]
 
   const currentTools = await readConfig(baseUrl, token, 'tool_servers', 'TOOL_SERVER_CONNECTIONS')
   if (currentTools === 'forbidden') {

@@ -5,6 +5,7 @@ import { join } from 'path'
 import { safeStorage } from 'electron'
 import log from 'electron-log'
 
+import { migrateOmniRouteDefaults } from '../../shared/services/omniroute-defaults'
 import {
   MANAGED_SERVICES_SCHEMA_VERSION,
   type ManagedServiceDefinition
@@ -13,7 +14,6 @@ import { getConfig, getUserDataPath, setConfig, type AppConfig } from '../utils'
 import {
   createDefaultServices,
   materializeMcpoService,
-  OMNIROUTE_HEALTH_CHECK_URL,
   readLegacyAutostartEnabled
 } from './defaults'
 import { assertLocalHealthCheckUrl, assertRemoteEndpointUrl, getPortFromService } from './network'
@@ -388,13 +388,7 @@ export class ManagedServicesRegistry {
 
     return {
       schemaVersion: MANAGED_SERVICES_SCHEMA_VERSION,
-      services: (raw.services as PersistedService[]).map((service) =>
-        service.id === 'omniroute' &&
-        (service.healthCheckUrl === 'http://127.0.0.1:20128/v1/models' ||
-          service.healthCheckUrl === 'http://localhost:20128/v1/models')
-          ? { ...service, healthCheckUrl: OMNIROUTE_HEALTH_CHECK_URL }
-          : service
-      ),
+      services: (raw.services as PersistedService[]).map(migrateOmniRouteDefaults),
       encryptedSecrets: isRecord(raw.encryptedSecrets)
         ? (raw.encryptedSecrets as Record<string, string>)
         : undefined

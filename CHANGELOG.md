@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.25] - 2026-08-28
+
+### Fixed
+
+- **A model could see the selected local folder in the Files panel but still receive no filesystem
+  tools.** Local Open Terminal workspaces are now also registered as authenticated OpenAPI tool
+  servers, and local chat requests carry the matching tool id alongside `terminal_id`. This keeps
+  file creation, editing, commands, and builds available even when Open WebUI omits its special
+  terminal functions for a model.
+- **OmniRoute could stay yellow during a slow first startup.** Readiness now uses the lightweight
+  `/api/health/ping` endpoint with a five-minute cold-start timeout. Existing configurations using
+  legacy OmniRoute health endpoints are migrated automatically without replacing custom URLs.
+
 ## [0.0.20-services.24] - 2026-08-28
 
 ### Fixed

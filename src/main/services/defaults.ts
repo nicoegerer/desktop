@@ -4,11 +4,12 @@ import {
   MCPO_API_KEY_PLACEHOLDER,
   type ManagedServiceDefinition
 } from '../../shared/services/types'
+import {
+  OMNIROUTE_HEALTH_CHECK_URL,
+  OMNIROUTE_STARTUP_TIMEOUT_MS
+} from '../../shared/services/omniroute-defaults'
 
 const DEFAULT_RESTART_LIMIT = 3
-const DEFAULT_STARTUP_TIMEOUT_MS = 120_000
-
-export const OMNIROUTE_HEALTH_CHECK_URL = 'http://127.0.0.1:20128/api/monitoring/health'
 
 const createMcpoArgs = (
   host: string,
@@ -75,7 +76,7 @@ const createOmniRouteDefault = (enabled: boolean): ManagedServiceDefinition => {
     healthCheckUrl: OMNIROUTE_HEALTH_CHECK_URL,
     autoRestart: true,
     restartLimit: DEFAULT_RESTART_LIMIT,
-    startupTimeoutMs: DEFAULT_STARTUP_TIMEOUT_MS
+    startupTimeoutMs: OMNIROUTE_STARTUP_TIMEOUT_MS
   }
 }
 
