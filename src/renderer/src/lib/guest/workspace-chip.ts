@@ -399,7 +399,13 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
             var direct = Array.isArray(current)
               ? current.filter(function (terminal) { return !terminal || !terminal.id; })
               : [];
-            terminalServersStore.set(direct.concat(systemTerminals));
+            var proxiedSystemTerminals = systemTerminals.map(function (terminal) {
+              if (!terminal || !terminal.id) return terminal;
+              return Object.assign({}, terminal, {
+                url: '/api/v1/terminals/' + encodeURIComponent(terminal.id)
+              });
+            });
+            terminalServersStore.set(direct.concat(proxiedSystemTerminals));
             selectedTerminalIdStore.set(terminalId);
             if (showControlsStore && typeof showControlsStore.set === 'function') {
               showControlsStore.set(true);
@@ -813,6 +819,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     );
   };
   var ICON_FOLDER = svg('<path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.6.8l.9 1.2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>');
+  var ICON_CLOUD = svg('<path d="M17.5 19H9a7 7 0 1 1 6.71-9h.79a4.5 4.5 0 1 1 1 9Z"/>');
   var ICON_EMPTY = svg('<path d="M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.6.8l.9 1.2H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke-dasharray="3 2"/>');
 
   // Writes only what actually differs. The observer below reacts to DOM
@@ -845,7 +852,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
 
     var s = selection();
     reconcileSelection(s);
-    var icon = s ? ICON_FOLDER : ICON_EMPTY;
+    var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
     if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
     var text = label();
     if (chipLabel.textContent !== text) chipLabel.textContent = text;

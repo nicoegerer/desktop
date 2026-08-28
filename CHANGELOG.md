@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.24] - 2026-08-28
+
+### Fixed
+
+- **Selecting a GitHub workspace left the Files panel at `/` with a connection error.** The
+  per-chat workspace bridge now gives Open WebUI its authenticated terminal-proxy URL instead of
+  the mount's raw loopback URL. Open WebUI can therefore forward its login token and the mount API
+  key through the intended server-side path, and cloud repositories such as `JumpJump` load in the
+  Files panel.
+- **The selected cloud workspace still used a folder icon.** The main workspace chip now shows a
+  cloud for GitHub repositories and a folder for local workspaces, while repository rows in the
+  picker remain text-only.
+
 ## [0.0.20-services.23] - 2026-08-28
 
 ### Fixed

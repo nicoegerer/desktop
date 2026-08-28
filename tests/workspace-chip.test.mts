@@ -39,12 +39,26 @@ test('the terminal control has no positional, CSS-class, or SVG heuristic', () =
   assert.ok(!source.includes("cls.indexOf('translate-y"))
 })
 
-test('cloud repository rows stay text-only', () => {
+test('the cloud icon appears on the selected chip, not on repository rows', () => {
   const source = script()
 
   assert.ok(source.includes("results.appendChild(button(r.fullName"))
-  assert.ok(source.includes('var icon = s ? ICON_FOLDER : ICON_EMPTY'))
-  assert.ok(!source.includes('ICON_CLOUD'))
+  assert.ok(
+    source.includes(
+      "var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY"
+    )
+  )
+  assert.ok(
+    source.includes("}, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName));")
+  )
+})
+
+test('system workspaces use the authenticated Open WebUI terminal proxy', () => {
+  const source = script()
+
+  assert.ok(source.includes("url: '/api/v1/terminals/' + encodeURIComponent(terminal.id)"))
+  assert.ok(source.includes('direct.concat(proxiedSystemTerminals)'))
+  assert.ok(!source.includes('direct.concat(systemTerminals)'))
 })
 
 test('the connectors and hidden names are embedded', () => {
