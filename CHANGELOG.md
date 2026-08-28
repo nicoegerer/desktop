@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.22] - 2026-08-28
+
+### Fixed
+
+- **The native cloud/terminal selector duplicated the per-chat workspace control.** It is now
+  permanently hidden; the workspace selected on the right drives Open WebUI's terminal state
+  internally.
+- **Selecting a different folder left the Files panel on `desktop`.** Workspace registration now
+  waits for Open WebUI to accept the terminal, and a stale in-page terminal list is refreshed once
+  before the saved per-chat selection is restored.
+- Removed the fallback file browser so the Files and terminal panels consistently use Open WebUI's
+  selected terminal instead of maintaining a second, diverging workspace view.
+
 ## [0.0.20-services.21] - 2026-08-27
 
 ### Fixed

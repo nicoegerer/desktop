@@ -188,8 +188,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     style.id = STYLE_ID;
     style.textContent =
       'html.desktop-hide-terminal-menu [data-desktop-terminal-menu] {' +
-      'position:absolute !important;width:1px;height:1px;overflow:hidden;' +
-      'clip:rect(0 0 0 0);white-space:nowrap;}' +
+      'display:none !important;}' +
       'html.desktop-hide-tool-count button[aria-label="Available Tools"]{display:none !important;}';
     (document.head || document.documentElement).appendChild(style);
   };
@@ -252,37 +251,37 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   // the page can write it, so the chip operates Open WebUI's own terminal menu
   // instead — its click is the page's click, and everything follows.
   //
-  // If that ever stops working, the menu is shown again rather than leaving a
-  // chip that looks authoritative but selects nothing.
-  var remoteControlBroken = false;
+  // The desktop chip is the only user-facing workspace control. The native
+  // menu remains hidden and is operated internally so there cannot be two
+  // different-looking selections in the composer.
   var selectionBeingApplied = '';
   var appliedSelection = '';
   var selectionApplyAttempts = {};
-  var filePaths = {};
 
   var findTerminalMenuButton = function () {
-    var buttons = document.querySelectorAll('button[type="button"]');
+    var row = findRow();
+    if (!row) return null;
+    var buttons = row.querySelectorAll('button[type="button"]');
+    var chipBox = chip && chip.isConnected ? chip.getBoundingClientRect() : null;
+    var nearest = null;
+    var nearestGap = Number.MAX_VALUE;
     for (var i = 0; i < buttons.length; i++) {
       var b = buttons[i];
       if (b === chip) continue;
       var cls = b.getAttribute('class') || '';
-      if (cls.indexOf('translate-y-[1px]') === -1) continue;
-      if (cls.indexOf('text-[13px]') === -1) continue;
-      if (!b.querySelector('svg')) continue;
-      return b;
+      if (cls.indexOf('translate-y-[1px]') !== -1 && cls.indexOf('text-[13px]') !== -1 && b.querySelector('svg')) return b;
+      if (!chipBox || !b.querySelector('svg') || !(b.textContent || '').trim()) continue;
+      var box = b.getBoundingClientRect();
+      var gap = chipBox.left - (box.right || box.left);
+      if (gap >= -2 && gap < nearestGap) { nearest = b; nearestGap = gap; }
     }
-    return null;
+    return nearest;
   };
 
   var markTerminalMenu = function () {
     var button = findTerminalMenuButton();
     if (!button) return null;
-    var host = button.parentElement;
-    while (host && host.querySelectorAll('button').length < 2 && host.parentElement) {
-      if (host.getAttribute('class') && host.contains(button)) break;
-      host = host.parentElement;
-    }
-    (host || button).setAttribute('data-desktop-terminal-menu', '1');
+    button.setAttribute('data-desktop-terminal-menu', '1');
     return button;
   };
 
@@ -344,8 +343,20 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
 
   var applySelection = function (selected, done) {
     driveSelection(selected && selected.label ? selected.label : null, function (ok) {
-      remoteControlBroken = !ok;
-      setMenuHidden(!remoteControlBroken);
+      setMenuHidden(true);
+      if (ok && selected && selected.terminalId) {
+        try { sessionStorage.removeItem('desktop:terminal-reload:' + selected.terminalId); } catch (e) { /* storage unavailable */ }
+      }
+      if (!ok && selected && selected.terminalId) {
+        var reloadKey = 'desktop:terminal-reload:' + selected.terminalId;
+        try {
+          if (!sessionStorage.getItem(reloadKey)) {
+            sessionStorage.setItem(reloadKey, '1');
+            location.reload();
+            return;
+          }
+        } catch (e) { /* storage unavailable */ }
+      }
       scheduleRender();
       if (done) done(ok);
     });
@@ -382,89 +393,6 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         else appliedSelection = key;
       });
     });
-  };
-
-  // Open WebUI's built-in "Files" tab is the isolated Pyodide upload disk; it
-  // is not the selected terminal's filesystem. When that tab is visible for a
-  // workspace it consequently tries /mnt/uploads and fails. Replace only its
-  // failed content area with a small browser backed by the selected terminal.
-  var renderWorkspaceFiles = function (selected) {
-    if (!selected || !selected.terminalId) return;
-    var leaves = document.querySelectorAll('div, span, p');
-    var failure = null;
-    for (var i = 0; i < leaves.length; i++) {
-      var node = leaves[i];
-      if (node.children && node.children.length) continue;
-      if ((node.textContent || '').trim() === 'Failed to list directory') {
-        failure = node;
-        break;
-      }
-    }
-    if (!failure || !failure.parentElement) return;
-    var host = failure.parentElement;
-    var existing = host.querySelector('[data-desktop-workspace-files]');
-    var key = chatKey() + ':' + selected.terminalId;
-    if (existing && existing.getAttribute('data-key') === key) return;
-    if (existing) existing.remove();
-    failure.style.display = 'none';
-
-    var root = document.createElement('div');
-    root.setAttribute('data-desktop-workspace-files', '1');
-    root.setAttribute('data-key', key);
-    root.style.cssText = 'width:100%;height:100%;padding:18px;overflow:auto;text-align:left;';
-    host.appendChild(root);
-
-    var directory = filePaths[key] || '';
-    var paint = function () {
-      root.innerHTML = '';
-      var heading = document.createElement('div');
-      heading.style.cssText = 'font-size:12px;opacity:.65;margin-bottom:12px;display:flex;gap:8px;align-items:center;';
-      heading.textContent = (selected.label || selected.repoFullName || 'Workspace') +
-        (directory ? ' / ' + directory : '');
-      root.appendChild(heading);
-
-      var loading = document.createElement('div');
-      loading.style.cssText = 'font-size:12px;opacity:.45;';
-      loading.textContent = t('Dateien werden geladen …', 'Loading files …');
-      root.appendChild(loading);
-
-      ask('workspaceListFiles', { terminalId: selected.terminalId, directory: directory || '.' })
-        .then(function (result) {
-          if (!root.isConnected || root.getAttribute('data-key') !== key) return;
-          loading.remove();
-          if (!result || !result.ok) {
-            var error = document.createElement('div');
-            error.style.cssText = 'font-size:12px;color:#ef4444;';
-            error.textContent = (result && result.error) || t('Ordner konnte nicht gelesen werden.', 'Could not read folder.');
-            root.appendChild(error);
-            return;
-          }
-          var entries = Array.isArray(result.entries) ? result.entries.slice() : [];
-          entries.sort(function (a, b) {
-            if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
-            return String(a.name).localeCompare(String(b.name));
-          });
-          if (directory) {
-            var up = button('..', function () {
-              directory = directory.split('/').filter(Boolean).slice(0, -1).join('/');
-              filePaths[key] = directory; paint();
-            }, false, ICON_FOLDER);
-            up.style.width = '100%'; up.style.padding = '7px 4px';
-            root.appendChild(up);
-          }
-          entries.forEach(function (entry) {
-            var row = button(String(entry.name || ''), function () {
-              if (entry.type !== 'directory') return;
-              directory = [directory, entry.name].filter(Boolean).join('/');
-              filePaths[key] = directory; paint();
-            }, false, entry.type === 'directory' ? ICON_FOLDER : ICON_EMPTY);
-            row.style.width = '100%'; row.style.padding = '7px 4px';
-            row.style.opacity = entry.type === 'directory' ? '1' : '.72';
-            root.appendChild(row);
-          });
-        });
-    };
-    paint();
   };
 
   var label = function () {
@@ -729,23 +657,17 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       row.appendChild(chip);
     }
     markTerminalMenu();
-    setMenuHidden(!remoteControlBroken);
+    setMenuHidden(true);
 
     var s = selection();
     reconcileSelection(s);
-    renderWorkspaceFiles(s);
     var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
     if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
     var text = label();
     if (chipLabel.textContent !== text) chipLabel.textContent = text;
-    var title = remoteControlBroken
-      ? t(
-          'Auswahl konnte nicht auf Open WebUI übertragen werden — benutze das Wolken-Menü daneben',
-          'The selection could not be applied to Open WebUI — use the cloud menu next to this'
-        )
-      : s
-        ? t('Arbeitsbereich dieses Chats ändern', 'Change this conversation’s workspace')
-        : t('Arbeitsbereich für diesen Chat wählen', 'Choose a workspace for this conversation');
+    var title = s
+      ? t('Arbeitsbereich dieses Chats ändern', 'Change this conversation’s workspace')
+      : t('Arbeitsbereich für diesen Chat wählen', 'Choose a workspace for this conversation');
     if (chip.title !== title) chip.title = title;
     var opacity = s ? '0.85' : '0.5';
     if (chip.style.opacity !== opacity) chip.style.opacity = opacity;

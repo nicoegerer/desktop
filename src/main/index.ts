@@ -15,8 +15,7 @@ import {
   Menu,
   ipcMain,
   Tray,
-  dialog,
-  net as electronNet
+  dialog
 } from 'electron'
 import path, { join } from 'path'
 import { readFile, statfs } from 'fs/promises'
@@ -2030,6 +2029,21 @@ if (!gotTheLock) {
       ok: false,
       error: cause instanceof Error ? cause.message : String(cause)
     })
+    const syncWorkspaceRegistration = async (): Promise<void> => {
+      let result = await syncOpenWebUI({ refreshTerminals: true })
+      for (const delay of [250, 500, 1_000, 2_000]) {
+        if (result.status === 'synced' || result.status === 'unchanged') return
+        if (
+          result.status === 'skipped' &&
+          result.reason !== 'not-signed-in' &&
+          result.reason !== 'server-not-running'
+        )
+          break
+        await new Promise((resolve) => setTimeout(resolve, delay))
+        result = await syncOpenWebUI({ refreshTerminals: true })
+      }
+      throw new Error(`Workspace registration failed (${result.reason ?? result.status}).`)
+    }
 
     ipcMain.handle('workspace:chip:choose-folder', async () => {
       try {
@@ -2072,10 +2086,7 @@ if (!gotTheLock) {
           await setWorkspaceActive(workspacePath, true)
           sendToRenderer('status:open-terminal', 'started')
           sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
-          const sync = await syncOpenWebUI({ refreshTerminals: true })
-          if (sync.status === 'failed') {
-            throw new Error('The restored workspace could not be registered in Open WebUI.')
-          }
+          await syncWorkspaceRegistration()
           return {
             ok: true,
             path: workspacePath,
@@ -2140,34 +2151,6 @@ if (!gotTheLock) {
       }
     })
 
-    ipcMain.handle(
-      'workspace:chip:list-files',
-      async (_event, request: { terminalId?: string; directory?: string }) => {
-        try {
-          const terminalId = String(request?.terminalId ?? '')
-          const target = [
-            ...listWorkspaceTerminals(),
-            ...listGithubMounts().map((mount) => ({ ...mount, cwd: mount.name, status: 'started' }))
-          ].find((terminal) => terminal.id === terminalId)
-          if (!target?.url || !target?.apiKey) throw new Error('Workspace is not running')
-
-          const directory = String(request?.directory ?? '').replace(/\\/g, '/') || '.'
-          const response = await electronNet.fetch(
-            `${target.url.replace(/\/$/, '')}/files/list?directory=${encodeURIComponent(directory)}`,
-            {
-              headers: { Authorization: `Bearer ${target.apiKey}` },
-              signal: AbortSignal.timeout(20_000)
-            }
-          )
-          if (!response.ok) throw new Error(`File listing returned ${response.status}`)
-          const payload = await response.json()
-          return { ok: true, ...payload }
-        } catch (cause) {
-          return chipError(cause)
-        }
-      }
-    )
-
     // A cloud workspace is browsable without a checkout: the repository is
     // mounted read-only and registered as a terminal server, so the file panel
     // has something to show. Writing stays with the GitHub connector.
@@ -2185,10 +2168,7 @@ if (!gotTheLock) {
             repoFullName: String(repo.repoFullName),
             branch: String(repo.branch)
           })
-          const sync = await syncOpenWebUI({ refreshTerminals: true })
-          if (sync.status === 'failed') {
-            throw new Error('The repository could not be registered in Open WebUI.')
-          }
+          await syncWorkspaceRegistration()
           return { ok: true, terminal: { id: mount.id, name: mount.name } }
         } catch (cause) {
           return chipError(cause)
@@ -2208,10 +2188,7 @@ if (!gotTheLock) {
         sendToRenderer('open-terminal:ready', getOpenTerminalInfo())
 
         // The chat can only address the terminal once Open WebUI knows it.
-        const sync = await syncOpenWebUI({ refreshTerminals: true })
-        if (sync.status === 'failed') {
-          throw new Error('The workspace could not be registered in Open WebUI.')
-        }
+        await syncWorkspaceRegistration()
         return {
           ok: true,
           terminal: { id: terminal.id, name: path.basename(terminal.cwd) || terminal.cwd }
