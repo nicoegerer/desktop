@@ -1,0 +1,5 @@
+@import '../../src/renderer/src/app.css';
+
+/* The harness has a different Vite root; scan the real components as in production. */
+@source '../../src/renderer/src';
+@source '.';

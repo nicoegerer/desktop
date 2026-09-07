@@ -29,6 +29,20 @@ test('workspace switching never reloads the embedded page', () => {
   assert.ok(!script().includes('location.reload'))
 })
 
+test('website preview is tied to the current local selection and invalidated before switching', () => {
+  const source = script()
+  assert.ok(
+    source.includes(
+      "ask('workspacePreviewShow', { terminalId: current.terminalId, chatKey: chatKey() })"
+    )
+  )
+  assert.ok(source.includes("if (busy || !s || s.mode !== 'local') return;"))
+  assert.ok(source.includes('reportPreviewState(true);'))
+  assert.ok(source.includes("ask('workspacePreviewState', data)"))
+  assert.ok(source.includes('if (previewButton.textContent !== previewText)'))
+  assert.ok(source.includes('bridge.hideFiles()'))
+})
+
 test('the terminal control has no positional, CSS-class, or SVG heuristic', () => {
   const source = script()
 

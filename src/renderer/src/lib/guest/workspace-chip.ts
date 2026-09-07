@@ -114,6 +114,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     // the chip can never claim a workspace while Files still shows another.
     selectionBeingApplied = 'manual:' + version;
     busy = true;
+    reportPreviewState(true);
     note = t('Arbeitsbereich wird aktiviert …', 'Activating workspace …');
     renderPanel();
     var task = Promise.resolve().then(load).then(function (value) {
@@ -135,6 +136,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
           );
           reportLiveWorkspaces();
           renderPanel();
+          scheduleRender();
           return false;
         }
         saveSelection(ready, key);
@@ -151,6 +153,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       note = error && error.message ? error.message : String(error);
       reportLiveWorkspaces();
       renderPanel();
+      scheduleRender();
       return false;
     });
     manualSelection = { key: key, promise: task };
@@ -294,6 +297,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       'display:none !important;}' +
       '[data-desktop-automatic-tool]{display:none !important;}' +
       'html.desktop-hide-tool-count button[aria-label="Available Tools"]{display:none !important;}';
+    style.textContent += '[data-desktop-preview]:focus-visible{outline:2px solid currentColor;outline-offset:2px;}';
     (document.head || document.documentElement).appendChild(style);
   };
 
@@ -329,6 +333,17 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var chip = null;
   var chipIcon = null;
   var chipLabel = null;
+  var previewButton = null;
+  var previewContext = '';
+  var reportPreviewState = function (pending) {
+    var s = selection();
+    var data = { chatKey: chatKey(), terminalId: s && s.terminalId || '',
+      mode: s && s.mode || '', label: s && s.label || '', pending: !!pending };
+    var key = JSON.stringify(data);
+    if (key === previewContext) return;
+    previewContext = key;
+    ask('workspacePreviewState', data);
+  };
   var panel = null;
   var mode = 'local';
   var repos = null;
@@ -464,6 +479,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       terminalServers: terminalServersStore,
       selectedTerminalId: selectedTerminalIdStore,
       showControls: module[aliases.showControls],
+      showSettings: module[aliases.showSettings],
       showFileNavPath: module[aliases.showFileNavPath],
       showFileNavDir: module[aliases.showFileNavDir]
     }, originalFetch.bind(window), function () { return localStorage.getItem('token') || ''; });
@@ -516,7 +532,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
           }
           if (sourceIndex < 0) return inspect(index + 1);
 
-          var names = ['terminalServers', 'selectedTerminalId', 'showControls', 'showFileNavPath', 'showFileNavDir', 'tools'];
+          var names = ['terminalServers', 'selectedTerminalId', 'showControls', 'showFileNavPath', 'showFileNavDir', 'tools', 'showSettings'];
           var aliases = {};
           for (var n = 0; n < names.length; n++) {
             var local = generatedLocalName(map, code, sourceIndex, names[n]);
@@ -900,6 +916,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     // The chat id only appears after a pushState, which raises no event, so the
     // handover is checked whenever the page changes.
     var adopted = adoptDraft();
+    reportPreviewState(busy);
     tidyOpenWebUIChrome();
     var row = findRow();
     if (!row) return;
@@ -919,10 +936,36 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       chip.appendChild(chipLabel);
       row.appendChild(chip);
     }
+    if (!previewButton || !previewButton.isConnected) {
+      previewButton = document.createElement('button');
+      previewButton.type = 'button';
+      previewButton.setAttribute('data-desktop-preview', '1');
+      previewButton.style.cssText = CHIP_STYLE;
+      previewButton.onclick = function (event) {
+        event.preventDefault(); event.stopPropagation();
+        var s = selection();
+        if (busy || !s || s.mode !== 'local') return;
+        var context = chatKey() + ':' + s.terminalId;
+        discoverStoreBridge().then(function (bridge) {
+          var current = selection();
+          if (busy || !current || context !== chatKey() + ':' + current.terminalId) return;
+          if (bridge && bridge.hideFiles) bridge.hideFiles();
+          ask('workspacePreviewShow', { terminalId: current.terminalId, chatKey: chatKey() });
+        });
+      };
+      row.appendChild(previewButton);
+    }
     markTerminalMenu();
     setMenuHidden(true);
 
     var s = selection();
+    var previewText = t('Vorschau', 'Preview');
+    if (previewButton.textContent !== previewText) previewButton.textContent = previewText;
+    previewButton.disabled = busy || !s || s.mode !== 'local';
+    previewButton.style.opacity = previewButton.disabled ? '0.4' : '0.85';
+    previewButton.title = s && s.mode === 'cloud'
+      ? t('Vorschau benötigt einen lokalen Arbeitsbereich', 'Preview requires a local workspace')
+      : t('Website aus dem ausgewählten Arbeitsbereich anzeigen', 'Preview the selected workspace website');
     reconcileSelection(s);
     var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
     if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
@@ -968,6 +1011,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         var oldKey = chatKey();
         var result = original.apply(window.history, arguments);
         if (oldKey !== chatKey()) {
+          reportPreviewState(true);
           selectionVersion++;
           selectionBeingApplied = '';
           busy = false;
@@ -985,6 +1029,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   try {
     document.addEventListener('click', function () { closePanel(); });
     window.addEventListener('popstate', function () {
+      reportPreviewState(true);
       selectionVersion++;
       selectionBeingApplied = '';
       busy = false;
@@ -999,6 +1044,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     reportLiveWorkspaces();
 
     window[FLAG] = {
+      openIntegrations: function () { return discoverStoreBridge().then(function (bridge) {
+        return !!(bridge && bridge.openIntegrations && bridge.openIntegrations());
+      }); },
       configure: function (next) { opts = next; repos = null; scheduleRender(); }
     };
   } catch (e) {

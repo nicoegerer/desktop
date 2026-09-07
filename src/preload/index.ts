@@ -1,6 +1,7 @@
 import { ipcRenderer, contextBridge } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { managedServicesApi } from './services'
+import type { WorkspacePreviewInfo, WorkspacePreviewResult } from '../shared/workspace-preview'
 
 // ─── PTY MessagePort ────────────────────────────────────
 // MessagePorts stay in the preload (cannot cross contextBridge).
@@ -201,6 +202,24 @@ const api = {
 
   syncOpenWebUI: () => ipcRenderer.invoke('open-webui:sync'),
 
+  // Address a registered workspace, never an arbitrary renderer-supplied disk path.
+  workspacePreviewOpen: (request: {
+    terminalId: string
+    entryPath?: string
+  }): Promise<WorkspacePreviewResult> =>
+    ipcRenderer.invoke('workspace:preview:open', {
+      terminalId: request?.terminalId,
+      entryPath: request?.entryPath
+    }),
+  workspacePreviewClose: (request: {
+    id: string
+  }): Promise<{ ok: true } | Extract<WorkspacePreviewResult, { ok: false }>> =>
+    ipcRenderer.invoke('workspace:preview:close', { id: request?.id }),
+  workspacePreviewGetActive: (): Promise<
+    | { ok: true; preview: WorkspacePreviewInfo | null }
+    | Extract<WorkspacePreviewResult, { ok: false }>
+  > => ipcRenderer.invoke('workspace:preview:get-active'),
+
   // Updater
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),
@@ -212,6 +231,8 @@ const api = {
   // Auth token relay from webview
   setAuthToken: (token: string) => ipcRenderer.invoke('app:setAuthToken', token)
 }
+
+export type DesktopApi = typeof api
 
 if (process.contextIsolated) {
   try {

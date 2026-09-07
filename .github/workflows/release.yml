@@ -97,6 +97,12 @@ jobs:
                   python -B tests/test_workspace_write_guard.py --real --real-http -v
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+            - name: Test isolated website preview in Chromium
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              timeout-minutes: 10
+              shell: pwsh
+              run: node --experimental-strip-types --test tests/workspace-preview.browser.mts
+
             - name: Download Compiled Output
               uses: actions/download-artifact@v4
               with:

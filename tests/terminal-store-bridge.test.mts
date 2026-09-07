@@ -2,6 +2,41 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createTerminalStoreBridge } from '../src/renderer/src/lib/guest/terminal-store-bridge.ts'
 
+test('preview and OAuth setup controls remain separate from workspace selection', () => {
+  const value = <T,>(
+    initial: T
+  ): { set(next: T): void; subscribe(run: (v: T) => void): () => void; get(): T } => ({
+    set(next: T) {
+      initial = next
+    },
+    subscribe(run: (v: T) => void) {
+      run(initial)
+      return () => {}
+    },
+    get: () => initial
+  })
+  const terminals = value([{ id: 'active' }])
+  const selected = value<string | null>('active')
+  const controls = value(true)
+  const settings = value('')
+  const bridge = createTerminalStoreBridge(
+    {
+      terminalServers: terminals,
+      selectedTerminalId: selected,
+      showControls: controls,
+      showSettings: settings
+    },
+    fetch,
+    () => ''
+  )
+  bridge.hideFiles()
+  assert.equal(controls.get(), false)
+  assert.equal(selected.get(), 'active')
+  assert.equal(bridge.openIntegrations(), true)
+  assert.equal(settings.get(), 'admin:integrations')
+  assert.equal(selected.get(), 'active')
+})
+
 interface TestStore<T> {
   value: T
   changes: T[]
@@ -65,6 +100,16 @@ function setup(fetchOverride?: typeof fetch): Fixture {
   )
   return { stores, calls, bridge }
 }
+
+test('same-chat turns preserve hidden Files while a website preview is open', async () => {
+  const h = setup()
+  await h.bridge.select('desktop-ws-test', () => true, { context: 'chat-a' })
+  h.bridge.hideFiles()
+  await h.bridge.select('desktop-ws-test', () => true, { context: 'chat-a' })
+  assert.equal(h.stores.showControls.value, false)
+  await h.bridge.select('desktop-ws-test', () => true, { context: 'chat-b' })
+  assert.equal(h.stores.showControls.value, true)
+})
 
 test('same-chat folder switch resets preview and back stack before selecting the new terminal', async () => {
   const h = setup()

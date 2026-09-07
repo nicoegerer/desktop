@@ -90,6 +90,12 @@ import {
 } from './utils/huggingface'
 
 import { initializeManagedServices, getManagedServicesManager } from './services'
+import { WorkspacePreviewError, WorkspacePreviewManager } from './services/workspace-preview'
+import { createWorkspacePreviewHandlers } from './services/workspace-preview-ipc'
+import {
+  getWorkspacePreviewRequestHeaders,
+  isWorkspacePreviewNavigationAllowed
+} from '../shared/workspace-preview'
 import {
   configureGithubFs,
   listGithubMounts,
@@ -122,6 +128,24 @@ log.transports.file.resolvePathFn = () => getLogFilePath('main')
 import icon from '../../resources/icon.png?asset'
 
 import { existsSync, writeFileSync, unlinkSync } from 'fs'
+
+const workspacePreviewManager = new WorkspacePreviewManager()
+const workspacePreview = createWorkspacePreviewHandlers({
+  manager: workspacePreviewManager,
+  listTerminals: listWorkspaceTerminals,
+  // Generated pages have no IPC bridge; only the desktop's own main frame may request previews.
+  isTrustedSender: (event) =>
+    Boolean(
+      mainWindow &&
+        !mainWindow.isDestroyed() &&
+        event?.sender === mainWindow.webContents &&
+        event.senderFrame === mainWindow.webContents.mainFrame
+    ),
+  describeError: (cause) =>
+    cause instanceof WorkspacePreviewError
+      ? { ok: false, code: cause.code, error: cause.message }
+      : { ok: false, code: 'PREVIEW_START_FAILED', error: 'The website preview could not start.' }
+})
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('no-sandbox')
@@ -697,6 +721,15 @@ function createMainWindow(show = true): void {
   mainWindow = new BrowserWindow(windowOpts)
   mainWindow.setIcon(icon)
 
+  // A generated page must not navigate its iframe to an external origin, data URL,
+  // retired preview server or authenticated app endpoint to escape its CSP.
+  mainWindow.webContents.on('will-frame-navigate', (event) => {
+    if (
+      !event.isMainFrame &&
+      !isWorkspacePreviewNavigationAllowed(event.url, workspacePreviewManager.getActive()?.url)
+    ) event.preventDefault()
+  })
+
   if (CONFIG?.windowMaximized) {
     mainWindow.maximize()
   }
@@ -712,6 +745,11 @@ function createMainWindow(show = true): void {
   }
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
+    const activePreview = workspacePreviewManager.getActive()
+    if (
+      activePreview &&
+      isWorkspacePreviewNavigationAllowed(details.referrer?.url, activePreview.url)
+    ) return { action: 'deny' }
     openUrl(details.url)
     return { action: 'deny' }
   })
@@ -1358,6 +1396,20 @@ if (!gotTheLock) {
       })
     })
 
+    // Opaque sandboxed frames omit Referer for CSS/modules. Supply only the
+    // preview's own capability, only to its current origin and trusted renderer.
+    session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const requestHeaders =
+        mainWindow && details.webContentsId === mainWindow.webContents.id
+          ? getWorkspacePreviewRequestHeaders(
+              details.url,
+              workspacePreviewManager.getActive()?.url,
+              details.requestHeaders
+            )
+          : details.requestHeaders
+      callback({ requestHeaders })
+    })
+
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
 
@@ -1997,6 +2049,7 @@ if (!gotTheLock) {
 
     ipcMain.handle('open-terminal:stop', async () => {
       try {
+        await workspacePreview.closeAll()
         await stopOpenTerminal()
         sendToRenderer('status:open-terminal', 'stopped')
         scheduleOpenWebUISync()
@@ -2017,6 +2070,10 @@ if (!gotTheLock) {
     ipcMain.handle('open-terminal:pty:connect', () => connectOpenTerminalPtyPort())
 
     ipcMain.handle('open-webui:sync', () => syncOpenWebUI())
+
+    ipcMain.handle('workspace:preview:open', workspacePreview.open)
+    ipcMain.handle('workspace:preview:close', workspacePreview.close)
+    ipcMain.handle('workspace:preview:get-active', workspacePreview.getActive)
 
     // ─── Chat workspace chip ──────────────────────────
     // Serves the script injected into the Open WebUI page. Every handler
@@ -2079,6 +2136,7 @@ if (!gotTheLock) {
           if (!workspacePath)
             throw new Error('The selected workspace folder is no longer available.')
 
+          await workspacePreview.closeAll()
           const terminal = await startWorkspaceTerminal(workspacePath)
           await setWorkspaceActive(workspacePath, true)
           sendToRenderer('status:open-terminal', 'started')
@@ -2129,6 +2187,7 @@ if (!gotTheLock) {
         const stopped: string[] = []
         for (const terminal of listWorkspaceTerminals()) {
           if (wanted.has(terminal.id)) continue
+          await workspacePreview.releaseTerminal(terminal.id)
           await stopWorkspaceTerminal(terminal.cwd)
           await setWorkspaceActive(terminal.cwd, false)
           stopped.push(terminal.cwd)
@@ -2161,6 +2220,7 @@ if (!gotTheLock) {
               'Add the GitHub connector under Settings → Services & Connectors first.'
             )
           }
+          await workspacePreview.closeAll()
           const mount = await mountGithubRepo({
             repoFullName: String(repo.repoFullName),
             branch: String(repo.branch)
@@ -2178,6 +2238,7 @@ if (!gotTheLock) {
         if (typeof workspacePath !== 'string' || !workspacePath.trim()) {
           throw new Error('A workspace folder is required')
         }
+        await workspacePreview.closeAll()
         const terminal = await startWorkspaceTerminal(workspacePath)
         await rememberWorkspace(workspacePath)
         await setWorkspaceActive(workspacePath, true)
@@ -2535,6 +2596,7 @@ if (!gotTheLock) {
   app.on('before-quit', async () => {
     isQuiting = true
     cancelOpenWebUISync()
+    await workspacePreview.closeAll()
     await stopGithubFs()
     await stopLlamaCpp()
     await stopAllWorkspaceTerminals()

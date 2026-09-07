@@ -39,6 +39,17 @@
   let settingsOpen = $state(false)
   let connectedUrl = $state('')
   let activeConnectionId = $state('')
+
+  onMount(() => {
+    const revealLocalIntegrations = () => {
+      if (!openConnections.has('local')) return
+      activeConnectionId = 'local'
+      connectedUrl = openConnections.get('local')!
+      view = 'connected'
+    }
+    window.addEventListener('desktop:webui-integrations-opened', revealLocalIntegrations)
+    return () => window.removeEventListener('desktop:webui-integrations-opened', revealLocalIntegrations)
+  })
   let connectingId = $state('')
   let openConnections: Map<string, string> = $state(new Map())
   let localInstalled = $state(false)

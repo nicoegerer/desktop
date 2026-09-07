@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.30] - 2026-09-07
+
+### Added
+
+- Preview local websites directly beside the chat, with local CSS, JavaScript, images,
+  reload and a mobile viewport. Workspace and conversation changes close the old preview.
+- A searchable connector catalog and guided setup for GitHub, Gmail, Google Drive,
+  Google Calendar, remote MCP endpoints and local tools.
+- Google setup explains Developer Preview access and the user's own OAuth configuration,
+  then opens Open WebUI's existing integration settings. No account is connected automatically.
+
+### Improved
+
+- Simplify service actions and status labels while retaining advanced configuration,
+  existing credentials and import/export. Reachability is not shown as authentication.
+- Keep the file pane from reopening on every chat turn while a website preview is open.
+
+### Security and tests
+
+- Serve only allowed local website assets through an isolated, read-only loopback preview.
+  Opaque sandboxing, path checks and navigation guards separate websites from desktop APIs.
+- Add preview HTTP/IPC, lifecycle, connector-preservation and workspace regressions.
+- Gate Windows x64 releases on a real Chromium isolation and asset-loading regression.
+- Verify the interface with Computer Use in an isolated app using synthetic connections.
+
 ## [0.0.20-services.29] - 2026-09-07
 
 ### Fixed

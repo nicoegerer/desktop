@@ -13,9 +13,12 @@ interface TerminalStores {
   showControls?: { set(value: boolean): void }
   showFileNavPath?: { set(value: null): void }
   showFileNavDir?: { set(value: null): void }
+  showSettings?: { set(value: string): void }
 }
 
 interface TerminalStoreBridge {
+  hideFiles(): void
+  openIntegrations(): boolean
   select(
     terminalId: string | null,
     isCurrent?: () => boolean,
@@ -41,6 +44,14 @@ export function createTerminalStoreBridge(
   let appliedContext: string | null = null
 
   return {
+    hideFiles(): void {
+      stores.showControls?.set(false)
+    },
+    openIntegrations(): boolean {
+      if (!stores.showSettings) return false
+      stores.showSettings.set('admin:integrations')
+      return true
+    },
     select(
       terminalId: string | null,
       isCurrent: () => boolean = () => true,
@@ -104,7 +115,7 @@ export function createTerminalStoreBridge(
           stores.terminalServers.set(direct.concat(proxiedSystemTerminals))
         }
         stores.selectedTerminalId.set(terminalId)
-        if (terminalId) stores.showControls?.set(true)
+        if (terminalId && changed) stores.showControls?.set(true)
         appliedContext = workspace.context ?? ''
         return read(stores.selectedTerminalId) === terminalId
       })
