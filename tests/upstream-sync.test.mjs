@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
+import { runInNewContext } from 'node:vm'
 import { prepareSync, nextServicesVersion } from '../.github/scripts/prepare-upstream-sync.mjs'
 
 const fixture = (t) => {
@@ -128,4 +129,39 @@ test('every gh operation targets an explicit repository after adding upstream', 
       `GitHub command may select the upstream repository: ${command}`
     )
   }
+})
+
+test('release requires completed successful packaging and the Windows HTTP gate', () => {
+  const source = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+  const packageJob = source.match(/\n {4}package:\r?\n([\s\S]*?)(?=\n {4}release:)/)?.[1]
+  const releaseJob = source.match(/\n {4}release:\r?\n([\s\S]*)/)?.[1]
+  assert.ok(packageJob && releaseJob)
+  assert.match(packageJob, /^ {8}needs: compile\s*$/m)
+  assert.match(packageJob, /^\s+- os: ['"]?windows-[\w-]+['"]?\r?\n\s+arch: ['"]?x64['"]?\s*$/m)
+  assert.match(releaseJob, /^ {8}needs: package\s*$/m)
+  const condition = releaseJob.match(/ {8}if: >-\r?\n([\s\S]*?)\r?\n {8}runs-on:/)?.[1]
+  assert.ok(condition)
+  const allowed = (result, eventName = 'push', workflowCancelled = false) =>
+    runInNewContext(
+      condition,
+      {
+        github: { event_name: eventName, ref: 'refs/heads/release' },
+        needs: { package: { result } },
+        cancelled: () => workflowCancelled
+      },
+      { timeout: 1000 }
+    )
+  for (const result of ['success', 'failure', 'skipped', 'cancelled']) {
+    assert.equal(allowed(result), result === 'success', `package=${result} must fail closed`)
+  }
+  assert.equal(allowed('success', 'workflow_dispatch'), true)
+  assert.equal(allowed('success', 'pull_request'), false)
+  assert.equal(allowed('success', 'push', true), false)
+  const httpGate = packageJob.match(
+    /- name: Test installed Windows filesystem HTTP routes([\s\S]*?)(?=\n {12}- name:)/
+  )?.[1]
+  assert.ok(httpGate)
+  assert.match(httpGate, /if: runner\.os == 'Windows' && matrix\.arch == 'x64'/)
+  assert.match(httpGate, /python -B tests\/test_workspace_write_guard\.py --real --real-http -v/)
+  assert.doesNotMatch(httpGate, /continue-on-error:\s*true/)
 })

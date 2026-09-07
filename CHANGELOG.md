@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve an actionable workspace-mismatch response through Open Terminal's HTTP layer.
   The Windows error handler could turn the rejected write into an opaque server error;
   the write itself was already blocked in `.27`.
+- Require every packaging job to succeed before publication; failed, skipped or cancelled
+  dependency chains cannot publish a release.
 
 ### Tests
 
