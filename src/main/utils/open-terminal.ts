@@ -2,8 +2,9 @@
 
 import crypto from 'crypto'
 import os from 'os'
+import path from 'path'
 import log from 'electron-log'
-import { safeStorage } from 'electron'
+import { app, safeStorage } from 'electron'
 import * as pty from 'node-pty'
 import {
   getPythonPath,
@@ -205,11 +206,9 @@ export const startWorkspaceTerminal = async (
     const port = await findFreePort(config.openTerminal?.port || BASE_PORT)
     const pythonPath = getPythonPath()
 
+    const resourceRoot = app.isPackaged ? `${app.getAppPath()}.unpacked` : app.getAppPath()
     const commandArgs = [
-      '-m',
-      'uv',
-      'run',
-      'open-terminal',
+      path.join(resourceRoot, 'resources', 'open-terminal-workspace.py'),
       'run',
       '--host',
       HOST,
@@ -232,6 +231,7 @@ export const startWorkspaceTerminal = async (
           ...(configEnvVars ?? {}),
           OPEN_TERMINAL_API_KEY: apiKey,
           OPEN_TERMINAL_FILE_BROWSER_ROOT: workspacePath,
+          OPEN_WEBUI_DESKTOP_WORKSPACE_ROOT: workspacePath,
           PYTHONUNBUFFERED: '1',
           ...(process.platform === 'win32' ? { PYTHONIOENCODING: 'utf-8' } : {})
         }

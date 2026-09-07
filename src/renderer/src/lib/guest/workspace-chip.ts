@@ -1,4 +1,5 @@
 import { applyWorkspaceToPayload } from '../../../../shared/services/chat-payload.ts'
+import { createTerminalStoreBridge } from './terminal-store-bridge.ts'
 
 /**
  * Source of the script injected into the embedded Open WebUI page.
@@ -30,6 +31,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
 
   var opts = ${JSON.stringify(options)};
   var applyWorkspaceToPayload = ${applyWorkspaceToPayload.toString()};
+  var createTerminalStoreBridge = ${createTerminalStoreBridge.toString()};
 
   var t = function (de, en) { return opts.german ? de : en; };
 
@@ -51,6 +53,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var lastChatKey = readAll().draft ? 'draft' : chatKey();
   var pendingSelection = null;
   var pendingSourceKey = null;
+  var selectionVersion = 0;
+  var manualSelection = null;
+  var temporaryChat = function (key) { return key === 'draft' || key === 'new'; };
 
   // Sending the first message turns the draft into a real conversation and the
   // URL gains its id. Without carrying the choice over, the workspace picked
@@ -60,11 +65,11 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     if (key === lastChatKey) return null;
     var all = readAll();
     var adopted = null;
-    if (!all[key]) {
+    if (!all[key] && temporaryChat(lastChatKey) && !temporaryChat(key)) {
       adopted = pendingSelection || all.draft || null;
       if (adopted) all[key] = adopted;
     }
-    if (pendingSourceKey && pendingSourceKey !== key) delete all[pendingSourceKey];
+    if (pendingSourceKey && temporaryChat(pendingSourceKey) && pendingSourceKey !== key) delete all[pendingSourceKey];
     if (key !== 'draft') delete all.draft;
     if (adopted || pendingSourceKey) writeAll(all);
     lastChatKey = key;
@@ -94,55 +99,102 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     }
     ask('workspaceKeepAlive', { ids: ids });
   };
-  var saveSelection = function (value) {
+  var saveSelection = function (value, key) {
     var all = readAll();
-    if (value) { all[chatKey()] = value; } else { delete all[chatKey()]; }
+    key = key || chatKey();
+    if (value) { all[key] = value; } else { delete all[key]; }
     writeAll(all);
   };
-  var select = function (value) {
+  var changeWorkspace = function (load) {
+    var key = chatKey();
+    var version = ++selectionVersion;
+    var current = function () { return key === chatKey() && version === selectionVersion; };
     // Reserve a newly started terminal while the live Open WebUI stores are
     // updated. Persist and render the chip only after that update succeeds, so
     // the chip can never claim a workspace while Files still shows another.
-    reportLiveWorkspaces(value);
-    selectionBeingApplied = 'manual:' + chatKey() + ':' + ((value && value.terminalId) || 'none');
+    selectionBeingApplied = 'manual:' + version;
     busy = true;
     note = t('Arbeitsbereich wird aktiviert …', 'Activating workspace …');
     renderPanel();
-    ensureWorkspaceReady(value).then(function (ready) {
+    var task = Promise.resolve().then(load).then(function (value) {
+      if (!current()) return null;
+      reportLiveWorkspaces(value);
+      return ensureWorkspaceReady(value);
+    }).then(function (ready) {
+      if (!current()) return false;
       reportLiveWorkspaces(ready);
-      return applySelectionAsync(ready).then(function (ok) {
+      return applySelectionAsync(ready, current).then(function (ok) {
+        if (!current()) return false;
         selectionBeingApplied = '';
         busy = false;
         if (!ok) {
+          appliedSelection = '';
           note = t(
             'Arbeitsbereich konnte nicht in Open WebUI aktiviert werden.',
             'The workspace could not be activated in Open WebUI.'
           );
           reportLiveWorkspaces();
           renderPanel();
-          return;
+          return false;
         }
-        saveSelection(ready);
+        saveSelection(ready, key);
         appliedSelection = chatKey() + ':' + ((ready && ready.terminalId) || 'none');
         reportLiveWorkspaces();
         closePanel();
         scheduleRender();
+        return true;
       });
     }).catch(function (error) {
+      if (!current()) return false;
       selectionBeingApplied = '';
       busy = false;
       note = error && error.message ? error.message : String(error);
       reportLiveWorkspaces();
       renderPanel();
+      return false;
     });
+    manualSelection = { key: key, promise: task };
+    task.then(function () { if (manualSelection && manualSelection.promise === task) manualSelection = null; });
+    return task;
   };
+  var select = function (value) { return changeWorkspace(function () { return value; }); };
 
   // ── Request rewriting ───────────────────────────────
   var originalFetch = window.fetch;
+  var customToolCount = null;
+  var customToolNames = [];
+  var managedTool = function (tool) {
+    return tool && typeof tool.id === 'string' && (
+      opts.alwaysOnToolIds.indexOf(tool.id) !== -1 || tool.id.indexOf('server:desktop-workspace-') === 0
+    );
+  };
   window.fetch = function (input, init) {
     try {
       var url = typeof input === 'string' ? input : (input && input.url) || '';
       var method = (init && init.method) || (input && input.method) || 'GET';
+      // The chat picker lists optional tools. Desktop-managed tools are not
+      // optional per chat. Filter only the chat catalog, not the registry or
+      // admin pages; completion requests still include these tools below.
+      if (String(method).toUpperCase() === 'GET' &&
+          /^\\/(?:c\\/[^/]+\\/?)?$/.test(location.pathname) &&
+          /^\\/api\\/v1\\/tools\\/?(?:\\?|$)/.test(url)) {
+        return originalFetch.call(window, input, init).then(async function (response) {
+          if (!response.ok) return response;
+          try {
+            var catalog = await response.clone().json();
+            if (!Array.isArray(catalog)) return response;
+            var visible = catalog.filter(function (tool) { return !managedTool(tool); });
+            customToolNames = visible.map(function (tool) { return tool.name; });
+            if (url.indexOf('?') === -1 || !/[?&]query=./.test(url)) customToolCount = visible.length;
+            scheduleRender();
+            if (visible.length === catalog.length) return response;
+            var headers = new Headers(response.headers);
+            headers.delete('content-length');
+            headers.delete('content-encoding');
+            return new Response(JSON.stringify(visible), { status: response.status, headers: headers });
+          } catch (error) { return response; }
+        });
+      }
       if (
         String(method).toUpperCase() === 'POST' &&
         url.indexOf('/api/chat/completions') !== -1 &&
@@ -150,16 +202,28 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       ) {
         // Keep the exact selection used for the request. Open WebUI assigns the
         // permanent conversation id asynchronously after this fetch starts.
-        pendingSelection = selection();
-        pendingSourceKey = chatKey();
+        var requestKey = chatKey();
+        var pendingChange = manualSelection && manualSelection.key === requestKey ? manualSelection.promise : null;
         var originalBody = JSON.parse(init.body);
-        return ensureWorkspaceReady(pendingSelection).then(function (readySelection) {
+        return Promise.resolve(pendingChange).then(function (ok) {
+          if (pendingChange && !ok) throw new Error('Workspace activation failed. Select the workspace again before sending.');
+          if (requestKey !== chatKey()) throw new Error('The conversation changed before sending. Please send again.');
+          var requested = selection();
+          var requestVersion = selectionVersion;
+          var current = function () { return requestKey === chatKey() && requestVersion === selectionVersion; };
+          return ensureWorkspaceReady(requested).then(function (readySelection) {
+          if (!current()) throw new Error('The workspace changed before sending. Please send again.');
           reportLiveWorkspaces(readySelection);
-          return applySelectionAsync(readySelection).then(function (selectedInComposer) {
+          return applySelectionAsync(readySelection, current).then(function (selectedInComposer) {
+            if (!current()) throw new Error('The workspace changed before sending. Please send again.');
             if (readySelection && readySelection.terminalId && !selectedInComposer) {
               throw new Error('The selected workspace could not be applied to Open WebUI.');
             }
-            saveSelection(readySelection);
+            saveSelection(readySelection, requestKey);
+            if (temporaryChat(requestKey)) {
+              pendingSelection = readySelection;
+              pendingSourceKey = requestKey;
+            }
             reportLiveWorkspaces();
             var patched = applyWorkspaceToPayload(originalBody, {
               selection: readySelection,
@@ -167,6 +231,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
             });
             var nextInit = Object.assign({}, init, { body: JSON.stringify(patched) });
             return originalFetch.call(window, input, nextInit);
+          });
           });
         });
       }
@@ -201,7 +266,8 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       : { path: selected.path || '', terminalId: requestedId };
     terminalStarts[requestedId] = ask(requestType, request).then(function (result) {
       delete terminalStarts[requestedId];
-      if (!result || !result.ok || !result.terminal) return selected;
+      if (result && !result.ok) throw new Error(result.error || 'Workspace startup failed.');
+      if (!result || !result.terminal) return selected;
       var restored = Object.assign({}, selected, {
         path: result.path || selected.path,
         terminalId: result.terminal.id,
@@ -209,7 +275,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       });
       readyTerminals[restored.terminalId] = true;
       return restored;
-    });
+    }).catch(function (error) { delete terminalStarts[requestedId]; throw error; });
     return terminalStarts[requestedId];
   };
 
@@ -226,6 +292,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       'html.desktop-hide-terminal-menu [data-desktop-terminal-menu-wrapper],' +
       'html.desktop-hide-terminal-menu [data-desktop-terminal-menu] {' +
       'display:none !important;}' +
+      '[data-desktop-automatic-tool]{display:none !important;}' +
       'html.desktop-hide-tool-count button[aria-label="Available Tools"]{display:none !important;}';
     (document.head || document.documentElement).appendChild(style);
   };
@@ -235,23 +302,25 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
 
     var counter = document.querySelector('button[aria-label="Available Tools"]');
     var shown = counter ? parseInt((counter.textContent || '').replace(/[^0-9]+/g, ''), 10) : 0;
-    var onlyOurs = !counter || !(shown > opts.alwaysOnToolIds.length);
+    var onlyOurs = customToolCount !== null
+      ? customToolCount === 0 && (!counter || !(shown > 0))
+      : !counter || !(shown > opts.alwaysOnToolIds.length);
     document.documentElement.classList.toggle('desktop-hide-tool-count', onlyOurs);
 
     // If a tool of the user's own is active the panel stays reachable, so the
     // connector rows in it are hidden individually.
-    if (!onlyOurs && opts.hiddenToolNames.length) {
+    {
       var labels = document.querySelectorAll('div, span');
       for (var i = 0; i < labels.length; i++) {
         var node = labels[i];
-        if (node.dataset && node.dataset.desktopHidden) continue;
         if (node.children && node.children.length) continue;
         var text = (node.textContent || '').trim();
-        if (opts.hiddenToolNames.indexOf(text) === -1) continue;
-        var row = node.closest ? node.closest('button, [role="button"]') : null;
+        var row = node.closest ? node.closest('button[aria-pressed], [role="menuitemcheckbox"]') : null;
         if (!row) continue;
-        node.dataset.desktopHidden = '1';
-        row.style.display = 'none';
+        var automatic = customToolNames.indexOf(text) === -1 &&
+          (opts.hiddenToolNames.indexOf(text) !== -1 || text.indexOf('Open Terminal · ') === 0);
+        if (automatic) row.setAttribute('data-desktop-automatic-tool', '1');
+        else if (customToolNames.indexOf(text) !== -1) row.removeAttribute('data-desktop-automatic-tool');
       }
     }
   };
@@ -373,48 +442,31 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var bridgeFromModule = function (module, aliases) {
     var terminalServersStore = module[aliases.terminalServers];
     var selectedTerminalIdStore = module[aliases.selectedTerminalId];
-    var showControlsStore = aliases.showControls ? module[aliases.showControls] : null;
     if (
       !terminalServersStore || typeof terminalServersStore.set !== 'function' ||
       !selectedTerminalIdStore || typeof selectedTerminalIdStore.set !== 'function'
     ) return null;
 
-    return {
-      select: function (terminalId) {
-        if (!terminalId) {
-          selectedTerminalIdStore.set(null);
-          return Promise.resolve(readStore(selectedTerminalIdStore) === null);
-        }
-        var token = localStorage.getItem('token') || '';
-        return originalFetch.call(window, '/api/v1/terminals/', {
-          headers: token ? { Authorization: 'Bearer ' + token } : {}
-        }).then(function (response) {
-          if (!response || !response.ok) return false;
-          return response.json().then(function (systemTerminals) {
-            if (!Array.isArray(systemTerminals)) return false;
-            if (!systemTerminals.some(function (terminal) { return terminal.id === terminalId; })) {
-              return false;
-            }
-            var current = readStore(terminalServersStore);
-            var direct = Array.isArray(current)
-              ? current.filter(function (terminal) { return !terminal || !terminal.id; })
-              : [];
-            var proxiedSystemTerminals = systemTerminals.map(function (terminal) {
-              if (!terminal || !terminal.id) return terminal;
-              return Object.assign({}, terminal, {
-                url: '/api/v1/terminals/' + encodeURIComponent(terminal.id)
-              });
-            });
-            terminalServersStore.set(direct.concat(proxiedSystemTerminals));
-            selectedTerminalIdStore.set(terminalId);
-            if (showControlsStore && typeof showControlsStore.set === 'function') {
-              showControlsStore.set(true);
-            }
-            return readStore(selectedTerminalIdStore) === terminalId;
-          });
-        });
+    // The initial catalog may have loaded before injection. Only the chat
+    // cache is filtered; no tool configuration or credentials are removed.
+    var toolsStore = module[aliases.tools];
+    if (toolsStore && typeof toolsStore.set === 'function') {
+      var catalog = readStore(toolsStore);
+      if (Array.isArray(catalog)) {
+        var visible = catalog.filter(function (tool) { return !managedTool(tool); });
+        customToolNames = visible.map(function (tool) { return tool.name; });
+        customToolCount = visible.length;
+        if (visible.length !== catalog.length) toolsStore.set(visible);
       }
-    };
+    }
+
+    return createTerminalStoreBridge({
+      terminalServers: terminalServersStore,
+      selectedTerminalId: selectedTerminalIdStore,
+      showControls: module[aliases.showControls],
+      showFileNavPath: module[aliases.showFileNavPath],
+      showFileNavDir: module[aliases.showFileNavDir]
+    }, originalFetch.bind(window), function () { return localStorage.getItem('token') || ''; });
   };
 
   var discoverStoreBridge = function () {
@@ -464,7 +516,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
           }
           if (sourceIndex < 0) return inspect(index + 1);
 
-          var names = ['terminalServers', 'selectedTerminalId', 'showControls'];
+          var names = ['terminalServers', 'selectedTerminalId', 'showControls', 'showFileNavPath', 'showFileNavDir', 'tools'];
           var aliases = {};
           for (var n = 0; n < names.length; n++) {
             var local = generatedLocalName(map, code, sourceIndex, names[n]);
@@ -485,10 +537,15 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     return storeBridgePromise;
   };
 
-  var selectTerminalInComposer = function (terminalId) {
+  var selectTerminalInComposer = function (selected, current) {
+    var key = chatKey();
     return discoverStoreBridge().then(function (bridge) {
       return bridge && typeof bridge.select === 'function'
-        ? bridge.select(terminalId || null)
+        ? bridge.select((selected && selected.terminalId) || null, current, {
+            path: selected && selected.mode === 'local' ? selected.path : undefined,
+            chatId: temporaryChat(key) ? undefined : key,
+            context: key
+          })
         : false;
     }).then(function (ok) { return ok === true; });
   };
@@ -548,10 +605,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     document.documentElement.classList.toggle('desktop-hide-terminal-menu', !!hidden);
   };
 
-  var applySelection = function (selected, done) {
+  var applySelection = function (selected, done, current) {
     markTerminalMenu();
     setMenuHidden(true);
-    selectTerminalInComposer(selected && selected.terminalId).then(function (ok) {
+    selectTerminalInComposer(selected, current).then(function (ok) {
       setMenuHidden(true);
       scheduleRender();
       if (done) done(ok);
@@ -560,8 +617,8 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       if (done) done(false);
     });
   };
-  var applySelectionAsync = function (selected) {
-    return new Promise(function (resolve) { applySelection(selected, resolve); });
+  var applySelectionAsync = function (selected, current) {
+    return new Promise(function (resolve) { applySelection(selected, resolve, current); });
   };
 
   // Open WebUI rebuilds its composer state on route changes. Reconcile once per
@@ -569,10 +626,14 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   // workspace process after an app launch.
   var reconcileSelection = function (selected) {
     var selectedId = (selected && selected.terminalId) || '';
+    var sourceKey = chatKey();
+    var version = selectionVersion;
     var key = chatKey() + ':' + (selectedId || 'none');
+    var isCurrent = function () { return sourceKey === chatKey() && version === selectionVersion; };
     if (selectionBeingApplied || appliedSelection === key) return;
     selectionBeingApplied = key;
     ensureWorkspaceReady(selected).then(function (ready) {
+      if (!isCurrent()) return;
       var current = selection();
       var currentId = (current && current.terminalId) || '';
       if (currentId !== selectedId) {
@@ -582,6 +643,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       var restoredId = (ready && ready.terminalId) || '';
       if (restoredId && restoredId !== selectedId) reportLiveWorkspaces(ready);
       applySelection(ready, function (ok) {
+        if (!isCurrent()) return;
         selectionBeingApplied = '';
         if (ok) {
           saveSelection(ready);
@@ -593,7 +655,14 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         selectionApplyAttempts[key] = (selectionApplyAttempts[key] || 0) + 1;
         if (selectionApplyAttempts[key] < 4) setTimeout(scheduleRender, 500);
         else appliedSelection = key;
-      });
+      }, isCurrent);
+    }).catch(function (error) {
+      if (!isCurrent()) return;
+      selectionBeingApplied = '';
+      console.warn('[desktop] workspace restore:', error);
+      selectionApplyAttempts[key] = (selectionApplyAttempts[key] || 0) + 1;
+      if (selectionApplyAttempts[key] < 4) setTimeout(scheduleRender, 500);
+      else appliedSelection = key;
     });
   };
 
@@ -628,23 +697,18 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   };
 
   var openLocal = function (path, name) {
-    busy = true; note = t('Terminal wird gestartet …', 'Starting terminal …'); renderPanel();
-    ask('workspaceOpenLocal', { path: path }).then(function (result) {
-      busy = false;
+    return changeWorkspace(function () { return ask('workspaceOpenLocal', { path: path }).then(function (result) {
       if (!result || !result.ok) {
-        note = (result && result.error) || t('Start fehlgeschlagen.', 'Could not start.');
-        renderPanel();
-        return;
+        throw new Error((result && result.error) || t('Start fehlgeschlagen.', 'Could not start.'));
       }
       readyTerminals[result.terminal.id] = true;
-      select({
+      return {
         mode: 'local',
         path: path,
         terminalId: result.terminal.id,
         label: name || result.terminal.name
-      });
-      closePanel();
-    });
+      };
+    }); });
   };
 
   var renderPanel = function () {
@@ -674,6 +738,14 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     });
     panel.appendChild(tabs);
 
+    if (note && !busy) {
+      var status = document.createElement('div');
+      status.setAttribute('role', 'status');
+      status.textContent = note;
+      status.style.cssText = 'padding:6px 12px;font-size:12px;max-width:320px;';
+      panel.appendChild(status);
+    }
+
     var list = document.createElement('div');
     list.style.cssText = 'max-height:260px;overflow:auto;padding:2px 6px 6px;';
 
@@ -684,8 +756,12 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       list.appendChild(wait);
     } else if (mode === 'local') {
       list.appendChild(button(t('Ordner öffnen …', 'Open a folder …'), function () {
+        var sourceKey = chatKey();
+        var sourceVersion = selectionVersion;
         ask('workspaceChooseFolder').then(function (result) {
-          if (result && result.ok && result.path) openLocal(result.path, result.name);
+          if (sourceKey === chatKey() && sourceVersion === selectionVersion && result && result.ok && result.path) {
+            openLocal(result.path, result.name);
+          }
         });
       }));
       if (recent.length) {
@@ -720,26 +796,22 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
               results.appendChild(button(r.fullName, function () {
                 // Mounting the repository read-only gives the file panel
                 // something to show; writing stays with the GitHub tools.
-                busy = true; note = ''; renderPanel();
-                ask('workspaceMountRepo', {
+                changeWorkspace(function () { return ask('workspaceMountRepo', {
                   repoFullName: r.fullName,
                   branch: r.defaultBranch
                 }).then(function (result) {
-                  busy = false;
                   if (!result || !result.ok) {
-                    note = (result && result.error) ||
-                      t('Repository konnte nicht geöffnet werden.', 'Could not open the repository.');
-                    renderPanel();
-                    return;
+                    throw new Error((result && result.error) ||
+                      t('Repository konnte nicht geöffnet werden.', 'Could not open the repository.'));
                   }
-                  select({
+                  return {
                     mode: 'cloud',
                     repoFullName: r.fullName,
                     branch: r.defaultBranch,
                     terminalId: result.terminal.id,
                     label: result.terminal.name
-                  });
-                });
+                  };
+                }); });
               }, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName));
             });
         };
@@ -893,7 +965,14 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       var original = window.history[name];
       if (typeof original !== 'function') return;
       window.history[name] = function () {
+        var oldKey = chatKey();
         var result = original.apply(window.history, arguments);
+        if (oldKey !== chatKey()) {
+          selectionVersion++;
+          selectionBeingApplied = '';
+          busy = false;
+          closePanel();
+        }
         scheduleRender();
         return result;
       };
@@ -905,7 +984,13 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   // broken chip is a nuisance, a broken chat is not usable at all.
   try {
     document.addEventListener('click', function () { closePanel(); });
-    window.addEventListener('popstate', scheduleRender);
+    window.addEventListener('popstate', function () {
+      selectionVersion++;
+      selectionBeingApplied = '';
+      busy = false;
+      closePanel();
+      scheduleRender();
+    });
 
     var observer = new MutationObserver(scheduleRender);
     observer.observe(document.body, { childList: true, subtree: true });

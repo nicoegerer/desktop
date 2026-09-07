@@ -29,6 +29,32 @@ desktop release. Explicit user pins, disabled updates, and newer/custom runtimes
 Runtime upgrades still require package-registry access; on failure the existing runtime starts
 and the failure is logged. The runtime version remains visible in Open WebUI.
 
+## Conversation workspaces
+
+Workspace activation is versioned per conversation. A message waits for a pending manual
+selection; a superseded activation/request cannot save its old selection into the current
+chat. Draft handover never transfers the workspace of an existing conversation.
+
+The guest bridge sets the selected terminal's per-chat cwd before dispatch. On a terminal
+or conversation change it clears file-open requests and unmounts/remounts the native Files
+panel, without reloading Open WebUI or resetting the chat. The injected instruction identifies
+the current output root explicitly, even when earlier messages mention another directory.
+
+`resources/open-terminal-workspace.py` launches the installed official Open Terminal CLI.
+Its file-mutation guard rejects stale absolute output paths, traversal, and symlink escapes
+outside that instance's workspace with a recoverable HTTP 409 error. Reads remain available.
+This is an accidental-write safeguard, **not an OS sandbox**: shell commands still run with
+the desktop user's permissions. No installed upstream package is patched. The resource is
+unpacked beside the application's ASAR and retained across backend runtime upgrades.
+
+Automatic connectors and workspace servers are omitted from the optional chat-tool picker
+by their IDs, not disabled or deleted. Custom tools remain selectable. Completion requests
+continue to include the default connectors, with the active filesystem first.
+
+Release and upstream-sync gates check the published frontend stores, per-chat cwd API and
+filesystem mutation signatures. Local verification can also exercise the real installed
+Open Terminal using `python -B tests/test_workspace_write_guard.py --real`.
+
 ## Supported connector types
 
 - **Local process** — any executable plus arguments, working directory, environment, optional

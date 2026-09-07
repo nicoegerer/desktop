@@ -22,4 +22,40 @@ const result = apply(
 assert.equal(result.tool_ids[0], 'server:desktop-workspace-desktop-ws-build-check')
 assert.equal(result.terminal_id, 'desktop-ws-build-check')
 assert.ok(result.messages[0].content.includes('write_file'))
-console.log('Shipped renderer verified: self-contained rewriter, selected filesystem first')
+assert.ok(result.messages[0].content.includes('CURRENT workspace for THIS turn'))
+const bridgeStart = bundle.indexOf('function createTerminalStoreBridge(')
+assert.ok(bridgeStart >= 0, 'Terminal store bridge must be bundled')
+const bridgeEnd = bundle.indexOf('\n}\n', bridgeStart) + 2
+assert.ok(bridgeEnd > bridgeStart)
+const factory = new Function(`return (${bundle.slice(bridgeStart, bridgeEnd)})`)()
+const store = (initial) => ({
+  value: initial,
+  set(value) {
+    this.value = value
+  },
+  subscribe(run) {
+    run(this.value)
+    return () => {}
+  }
+})
+const stores = {
+  terminalServers: store([]),
+  selectedTerminalId: store('old'),
+  showFileNavPath: store('old.html'),
+  showFileNavDir: store('old.html')
+}
+const bridge = factory(
+  stores,
+  async () => ({ ok: true, json: async () => [{ id: 'new' }] }),
+  () => ''
+)
+assert.equal(
+  await bridge.select('new', () => true, { path: 'C:/fixture/new', chatId: 'fixture' }),
+  true
+)
+assert.equal(stores.selectedTerminalId.value, 'new')
+assert.equal(stores.showFileNavPath.value, null)
+assert.equal(stores.showFileNavDir.value, null)
+console.log(
+  'Shipped renderer verified: self-contained rewriter and store bridge, selected filesystem first, stale preview cleared'
+)

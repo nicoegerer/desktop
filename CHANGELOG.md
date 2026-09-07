@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.27] - 2026-09-07
+
+### Fixed
+
+- Switch workspaces within the same chat without reusing the previous output directory.
+  Messages wait for activation, and late requests cannot revert the selected folder or
+  overwrite another conversation's selection. Reassert the selected root as the per-chat cwd.
+- Clear stale file-open requests and remount the native Files panel on workspace/chat changes
+  to discard the previous preview and navigation history, without reloading Open WebUI.
+- Remove automatically active desktop connectors from the optional chat-tool picker and count.
+  Garmin, GitHub MCP and the selected filesystem remain included in completion requests;
+  custom tools remain selectable and service configurations are not removed.
+- Reject stale absolute paths, traversal and symlink escapes in workspace file mutations with
+  an actionable error. Reading previous source files remains possible. This file-operation
+  safeguard is not an OS sandbox; shell commands retain the desktop user's permissions.
+
+### Tests
+
+- Add same-chat switching, pending-send, late-response, cross-chat, tool-catalog and preview-reset
+  regression cases. Verify the compiled, injected store bridge as part of the production build.
+- Exercise the file guard against real Open Terminal on Windows. Gate upstream sync and releases
+  on the published frontend stores, per-chat cwd API and filesystem mutation signatures.
+- Continue to include the tested Open WebUI **0.11.3** and Open Terminal **0.11.34** runtimes.
+
 ## [0.0.20-services.26] - 2026-09-07
 
 ### Fixed

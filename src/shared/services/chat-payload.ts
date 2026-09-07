@@ -17,7 +17,7 @@ export interface ChatWorkspaceSelection {
   mode: 'local' | 'cloud'
   /** Open WebUI terminal id of the local workspace, when mode is 'local'. */
   terminalId?: string
-  /** Informational path; all file calls still go through the selected terminal. */
+  /** Authoritative root for this turn; earlier chat paths are historical. */
   path?: string
   /** Repository worked on without a checkout, when mode is 'cloud'. */
   repoFullName?: string
@@ -112,6 +112,11 @@ export function applyWorkspaceToPayload(
         localMarker +
         ' A local workspace is active through Open Terminal' +
         (selection.path ? ' at ' + JSON.stringify(selection.path) : '') +
+        '. This is the CURRENT workspace for THIS turn, even if earlier messages or tool results name another folder.' +
+        ' A workspace switch does not require a new chat. Treat earlier output paths as history, not as the current destination.' +
+        ' Create new files and variants under this current workspace; do not reuse an absolute output path from an earlier turn.' +
+        ' Use paths relative to this workspace or absolute paths inside it. Read earlier source files only when needed;' +
+        ' file mutations outside it are rejected. To modify another folder, ask the user to select that workspace first' +
         '. Use the file tools to inspect, create and modify files directly in this workspace.' +
         ' Prefer write_file/replace_file_content over shell quoting, and verify the result with read_file.' +
         ' When asked to build or edit something, save the files, not just a code block for copying.' +

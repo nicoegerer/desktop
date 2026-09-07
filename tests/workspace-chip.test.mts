@@ -42,15 +42,13 @@ test('the terminal control has no positional, CSS-class, or SVG heuristic', () =
 test('the cloud icon appears on the selected chip, not on repository rows', () => {
   const source = script()
 
-  assert.ok(source.includes("results.appendChild(button(r.fullName"))
+  assert.ok(source.includes('results.appendChild(button(r.fullName'))
   assert.ok(
     source.includes(
       "var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY"
     )
   )
-  assert.ok(
-    source.includes("}, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName));")
-  )
+  assert.ok(source.includes("}, !!s && s.mode === 'cloud' && s.repoFullName === r.fullName));"))
 })
 
 test('system workspaces use the authenticated Open WebUI terminal proxy', () => {
@@ -101,12 +99,19 @@ interface Harness {
   navigate: (path: string) => void
   selectedTerminalId: () => string | null
   nativeClicks: () => { terminal: number; tools: number; integrations: number; globe: number }
+  changeWorkspace: (load: () => Promise<unknown>) => Promise<boolean>
+  toolsCounterHidden: () => boolean
 }
 
 const run = (
   seed?: Record<string, unknown>,
   initialPath = '/c/chat-123',
-  ensureResult?: Record<string, unknown>
+  ensureResult?: Record<string, unknown>,
+  options: {
+    select?: (id: string | null, current: () => boolean) => Promise<boolean>
+    fetch?: (url: unknown, init: unknown) => Promise<unknown>
+    counterCount?: number
+  } = {}
 ): Harness => {
   const calls: Array<{ url: string; body: unknown }> = []
   const bridge: Array<Record<string, unknown>> = []
@@ -116,6 +121,8 @@ const run = (
   let observerCallback: (() => void) | null = null
   let renders = 0
   let selectedTerminalId: string | null = null
+  let changeWorkspace!: Harness['changeWorkspace']
+  let toolsCounterHidden = false
   const nativeClicks = { terminal: 0, tools: 0, integrations: 0, globe: 0 }
   // A real MutationObserver delivers as a microtask, so a runaway render shows
   // up as an unbounded chain of callbacks rather than a stack overflow.
@@ -140,7 +147,13 @@ const run = (
       title: '',
       isConnected: true,
       children: [] as unknown[],
-      classList: { toggle: () => {}, add: () => {}, remove: () => {} },
+      classList: {
+        toggle: (name: string, value: boolean) => {
+          if (name === 'desktop-hide-tool-count') toolsCounterHidden = value
+        },
+        add: () => {},
+        remove: () => {}
+      },
       getAttribute: (name: string) => attributes[name] ?? null,
       setAttribute: (name: string, value: string) => {
         attributes[name] = value
@@ -194,6 +207,7 @@ const run = (
   anchor.id = 'input-menu-button'
   other.id = 'integration-menu-button'
   tools.setAttribute('aria-label', 'Available Tools')
+  tools.textContent = String(options.counterCount ?? 0)
   globe.setAttribute('aria-label', 'Web Search')
   terminalTrigger.setAttribute('role', 'button')
   terminalTrigger.setAttribute('aria-haspopup', 'true')
@@ -220,15 +234,17 @@ const run = (
     fetch: (url: unknown, init: unknown) => {
       // Mirrors the browser: the real fetch is bound to window and throws when
       // invoked with any other receiver.
-      // eslint-disable-next-line @typescript-eslint/no-invalid-this
       calls.push({ url: String(url), body: (init as { body?: string })?.body })
+      if (options.fetch) return options.fetch(url, init)
       return Promise.resolve({ ok: true })
     },
     addEventListener: () => {},
     __openWebUIDesktopTerminalBridge: {
-      select: (terminalId: string | null) => {
+      select: async (terminalId: string | null, current: () => boolean = () => true) => {
+        if (options.select && !(await options.select(terminalId, current))) return false
+        if (!current()) return false
         selectedTerminalId = terminalId
-        return Promise.resolve(true)
+        return true
       }
     },
     electronAPI: {
@@ -265,8 +281,12 @@ const run = (
       constructor(cb: () => void) {
         observerCallback = cb
       }
-      observe(): void {}
-      disconnect(): void {}
+      observe(): void {
+        /* The fixture drives mutation delivery explicitly. */
+      }
+      disconnect(): void {
+        /* No browser observer is allocated by the fixture. */
+      }
     }
   }
 
@@ -303,7 +323,11 @@ const run = (
     'console',
     'MutationObserver',
     'requestAnimationFrame',
-    script()
+    'captureChangeWorkspace',
+    script().replace(
+      'var select = function (value)',
+      'captureChangeWorkspace(changeWorkspace); var select = function (value)'
+    )
   )
   fn(
     win,
@@ -312,13 +336,18 @@ const run = (
     win.location,
     win.console,
     win.MutationObserver,
-    win.requestAnimationFrame
+    win.requestAnimationFrame,
+    (change: Harness['changeWorkspace']) => {
+      changeWorkspace = change
+    }
   )
 
   return {
     window: win,
     calls,
     bridge,
+    changeWorkspace: (load) => changeWorkspace(load),
+    toolsCounterHidden: () => toolsCounterHidden,
     storage: () => store,
     navigate: (path: string) => {
       ;(
@@ -593,4 +622,178 @@ test('a mounted repository is kept alive like a folder', async () => {
 
   const keepAlive = h.bridge.filter((c) => c.type === 'workspaceKeepAlive')
   assert.deepEqual(keepAlive[0].ids, ['desktop-gh-abc123def456'])
+})
+
+// Exercise the real changeWorkspace closure without opening a native picker.
+const workspace = (name: string): Record<string, string> => ({
+  mode: 'local',
+  terminalId: 'desktop-ws-' + name,
+  path: 'C:/work/' + name,
+  label: name
+})
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+const send = (
+  h: Harness,
+  messages: unknown[] = [{ role: 'user', content: 'create a file' }]
+): Promise<Response> =>
+  (h.window.fetch as typeof fetch)('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({ messages })
+  })
+
+test('test to whitemode in the SAME chat updates both the payload and composer', async () => {
+  const h = run({ 'chat-123': workspace('test') })
+  await send(h)
+  assert.equal(await h.changeWorkspace(async () => workspace('whitemode')), true)
+  await send(h, [
+    { role: 'assistant', content: 'Created C:/work/test/dark.html' },
+    { role: 'user', content: 'Create a light variant' }
+  ])
+  const payload = JSON.parse(String(h.calls.at(-1)?.body))
+  assert.equal(payload.terminal_id, 'desktop-ws-whitemode')
+  assert.equal(payload.tool_ids[0], 'server:desktop-workspace-desktop-ws-whitemode')
+  assert.ok(!payload.tool_ids.includes('server:desktop-workspace-desktop-ws-test'))
+  assert.ok(payload.messages[0].content.includes('C:/work/whitemode'))
+  assert.ok(payload.messages[0].content.includes('earlier output paths as history'))
+  assert.equal(h.selectedTerminalId(), 'desktop-ws-whitemode')
+  assert.equal(
+    JSON.parse(h.storage()['desktop:workspace-selection'])['chat-123'].label,
+    'whitemode'
+  )
+})
+
+test('sending while the new folder starts waits instead of using the previous folder', async () => {
+  const h = run({ 'chat-123': workspace('test') })
+  await h.settle()
+  const ready = deferred<unknown>()
+  const change = h.changeWorkspace(() => ready.promise)
+  const request = send(h)
+  await h.settle()
+  assert.equal(h.calls.length, 0)
+  ready.resolve(workspace('whitemode'))
+  assert.equal(await change, true)
+  await request
+  assert.equal(JSON.parse(String(h.calls[0].body)).terminal_id, 'desktop-ws-whitemode')
+})
+
+test('a delayed old request cannot revert a manual folder switch', async () => {
+  const delayed = deferred<boolean>()
+  let blockOld = false
+  const h = run({ 'chat-123': workspace('test') }, '/c/chat-123', undefined, {
+    select: (id) => (blockOld && id === 'desktop-ws-test' ? delayed.promise : Promise.resolve(true))
+  })
+  await h.settle()
+  blockOld = true
+  const rejected = assert.rejects(send(h), /workspace changed/)
+  await h.settle()
+  assert.equal(await h.changeWorkspace(async () => workspace('whitemode')), true)
+  delayed.resolve(true)
+  await rejected
+  await h.settle()
+  assert.equal(h.selectedTerminalId(), 'desktop-ws-whitemode')
+  assert.equal(
+    JSON.parse(h.storage()['desktop:workspace-selection'])['chat-123'].label,
+    'whitemode'
+  )
+  assert.equal(h.calls.length, 0, 'do not dispatch with a superseded workspace')
+})
+
+test('navigation during folder activation cannot save the old choice into another chat', async () => {
+  const h = run({ 'chat-123': workspace('test'), 'chat-other': workspace('other') })
+  await h.settle()
+  const ready = deferred<unknown>()
+  const changing = h.changeWorkspace(() => ready.promise)
+  h.navigate('/c/chat-other')
+  await h.settle()
+  ready.resolve(workspace('whitemode'))
+  assert.equal(await changing, false)
+  await h.settle()
+  const saved = JSON.parse(h.storage()['desktop:workspace-selection'])
+  assert.equal(saved['chat-123'].label, 'test')
+  assert.equal(saved['chat-other'].label, 'other')
+  assert.equal(h.selectedTerminalId(), 'desktop-ws-other')
+})
+
+test('sending in an existing chat and navigating does not transfer or delete its selection', async () => {
+  const h = run({ 'chat-123': workspace('test') })
+  await send(h)
+  h.navigate('/c/existing-without-workspace')
+  await h.settle()
+  const saved = JSON.parse(h.storage()['desktop:workspace-selection'])
+  assert.equal(saved['chat-123'].label, 'test')
+  assert.equal(saved['existing-without-workspace'], undefined)
+})
+
+const toolCatalog = [
+  { id: 'server:desktop-garmin', name: 'Garmin' },
+  { id: 'server:mcp:desktop-github-mcp', name: 'GitHub MCP' },
+  { id: 'server:desktop-workspace-desktop-ws-old', name: 'Open Terminal · old' },
+  { id: 'custom', name: 'My optional tool' }
+]
+
+test('chat tool catalog hides automatic connectors but keeps custom tools and actual access', async () => {
+  const h = run(undefined, '/c/chat-123', undefined, {
+    fetch: async () => Response.json(toolCatalog)
+  })
+  const response = await (h.window.fetch as typeof fetch)('/api/v1/tools/?')
+  assert.deepEqual(await response.json(), [toolCatalog[3]])
+  await send(h)
+  assert.deepEqual(JSON.parse(String(h.calls.at(-1)?.body)).tool_ids, [
+    'server:desktop-garmin',
+    'server:mcp:desktop-github-mcp'
+  ])
+})
+
+test('tool search is filtered too, without hiding a custom tool that happens to be named Garmin', async () => {
+  const own = { id: 'custom-garmin', name: 'Garmin' }
+  const h = run(undefined, '/', undefined, {
+    fetch: async () => Response.json([...toolCatalog, own])
+  })
+  const response = await (h.window.fetch as typeof fetch)('/api/v1/tools/?query=Garmin')
+  assert.deepEqual(await response.json(), [toolCatalog[3], own])
+})
+
+test('tool management and non-catalog requests remain untouched', async () => {
+  const h = run(undefined, '/workspace/tools', undefined, {
+    fetch: async () => Response.json(toolCatalog)
+  })
+  assert.deepEqual(
+    await (await (h.window.fetch as typeof fetch)('/api/v1/tools/')).json(),
+    toolCatalog
+  )
+  h.navigate('/c/chat-123')
+  assert.deepEqual(
+    await (await (h.window.fetch as typeof fetch)('/api/v1/tools/list')).json(),
+    toolCatalog
+  )
+  assert.deepEqual(
+    await (await (h.window.fetch as typeof fetch)('/api/v1/tools/', { method: 'POST' })).json(),
+    toolCatalog
+  )
+})
+
+test('a directly connected optional tool keeps its counter visible even with no catalog tools', async () => {
+  const h = run(undefined, '/', undefined, {
+    fetch: async () => Response.json([toolCatalog[0]]),
+    counterCount: 1
+  })
+  await (h.window.fetch as typeof fetch)('/api/v1/tools/?')
+  await h.settle()
+  assert.equal(h.toolsCounterHidden(), false)
+})
+
+test('an empty optional catalog hides the counter for automatically active tools', async () => {
+  const h = run(undefined, '/', undefined, {
+    fetch: async () => Response.json([toolCatalog[0]]),
+    counterCount: 0
+  })
+  await (h.window.fetch as typeof fetch)('/api/v1/tools/?')
+  await h.settle()
+  assert.equal(h.toolsCounterHidden(), true)
 })
