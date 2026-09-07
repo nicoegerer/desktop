@@ -30,6 +30,13 @@ jobs:
             - name: Test IPC Serialization
               run: npm run test:ipc
 
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Verify release runtime contract
+              run: python .github/scripts/check-runtime-contract.py
+
             - name: Typecheck and Build
               run: npm run build
 

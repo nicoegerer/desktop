@@ -3,6 +3,9 @@ productName: Open WebUI
 directories:
   buildResources: build
 files:
+  - '!tests/**'
+  - '!.github/**'
+  - '!**/*.log'
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'

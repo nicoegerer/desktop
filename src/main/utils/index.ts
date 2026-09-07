@@ -538,6 +538,33 @@ export const getPackageVersion = (packageName: string): string | null => {
   }
 }
 
+/** Consistent SQLite backup, including WAL, before a backend schema migration. */
+export const backupOpenWebUIDatabase = async (): Promise<string | null> => {
+  const source = path.join(getOpenWebUIDataPath(), 'webui.db')
+  if (!fs.existsSync(source)) return null
+  const backupDir = path.join(getOpenWebUIDataPath(), 'backups')
+  fs.mkdirSync(backupDir, { recursive: true })
+  const target = path.join(backupDir, `webui-before-update-${Date.now()}.db`)
+  const code = [
+    'import sqlite3, sys',
+    'from pathlib import Path',
+    'source = sqlite3.connect(Path(sys.argv[1]).as_uri() + "?mode=ro", uri=True)',
+    'target = sqlite3.connect(sys.argv[2])',
+    'try:',
+    '    source.backup(target)',
+    'finally:',
+    '    target.close()',
+    '    source.close()'
+  ].join('\n')
+  await new Promise<void>((resolve, reject) => {
+    execFile(getPythonPath(), ['-c', code, source, target], {
+      env: pythonEnv(), windowsHide: true, timeout: 60_000
+    }, (error) => error ? reject(error) : resolve())
+  })
+  log.info('Open WebUI database backup created:', target)
+  return target
+}
+
 export const uninstallPackage = (packageName: string): boolean => {
   const pythonPath = getPythonPath()
   if (!fs.existsSync(pythonPath)) return false

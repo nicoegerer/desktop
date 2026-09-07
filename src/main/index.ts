@@ -37,6 +37,7 @@ import {
   isPackageInstalled,
   isPythonInstalled,
   getPackageVersion,
+  backupOpenWebUIDatabase,
   uninstallPackage,
   isUvInstalled,
   openUrl,
@@ -112,6 +113,8 @@ import {
 } from './utils/workspaces'
 
 import { initUpdater, checkForUpdates, downloadUpdate, installUpdate } from './updater'
+import runtimeVersions from '../shared/runtime-versions.json'
+import { runtimeUpgradeVersion } from '../shared/services/runtime-update'
 
 import log from 'electron-log'
 log.transports.file.resolvePathFn = () => getLogFilePath('main')
@@ -970,15 +973,16 @@ const startServerHandler = async (): Promise<boolean> => {
   try {
     CONFIG = await getConfig()
 
-    // Auto-update the open-webui pip package to latest before starting.
-    // Only when autoUpdate is enabled (default) and no version pin is set.
-    const autoUpdate = CONFIG?.localServer?.autoUpdate !== false
-    const versionPin = CONFIG?.localServer?.version
-    if (autoUpdate && !versionPin && isPackageInstalled('open-webui')) {
+    // Each desktop release carries an explicit, compatibility-tested backend.
+    const runtimeUpgrade = runtimeUpgradeVersion(
+      getPackageVersion('open-webui'), runtimeVersions.openWebUI, CONFIG?.localServer
+    )
+    if (runtimeUpgrade && isPackageInstalled('open-webui')) {
       try {
-        log.info('[server] Auto-updating open-webui package to latest…')
+        log.info(`[server] Updating open-webui to release-tested ${runtimeUpgrade}…`)
         sendToRenderer('status:install', 'Updating Open WebUI…')
-        await installPackage('open-webui', undefined, (status: string) => {
+        await backupOpenWebUIDatabase()
+        await installPackage('open-webui', runtimeUpgrade, (status: string) => {
           sendToRenderer('status:install', status)
         })
         sendToRenderer('status:install', '')
@@ -1537,8 +1541,8 @@ if (!gotTheLock) {
     ipcMain.handle('install:package', async () => {
       try {
         CONFIG = await getConfig()
-        const owuiVersion = CONFIG?.localServer?.version || undefined
-        const otVersion = CONFIG?.openTerminal?.version || undefined
+        const owuiVersion = CONFIG?.localServer?.version || runtimeVersions.openWebUI
+        const otVersion = CONFIG?.openTerminal?.version || runtimeVersions.openTerminal
 
         sendToRenderer('status:install', 'Installing Open WebUI…')
         await installPackage('open-webui', owuiVersion, (status: string) => {

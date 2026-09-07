@@ -11,10 +11,23 @@ It does not ship personal service definitions, credentials, or provider accounts
 | `managed-services` | Long-lived public feature branch. Official upstream changes are merged here. |
 | `release` | Packaging branch with the fork update feed and monotonically increasing `services` versions. |
 
-The scheduled `sync-upstream.yml` workflow updates `main`, merges upstream into
-`managed-services`, merges that result into `release`, increments the fork prerelease version,
-and lets `release.yml` publish installers. Conflicts stop the workflow instead of discarding fork
-or upstream changes.
+The daily `sync-upstream.yml` workflow checks both official Desktop commits and stable
+`open-webui/open-webui` releases. It merges all feature and release changes into a candidate,
+updates `src/shared/runtime-versions.json`, and increments the Services version from the
+pre-merge release baseline. Tests, build and the runtime contract must pass before an atomic,
+non-forced push updates all three branches. Conflicts stop publication without discarding changes.
+The feature/default branch receives release fixes too, so its scheduled workflow stays current.
+
+The workflow explicitly dispatches `release.yml`: a `GITHUB_TOKEN` push does not trigger
+another push workflow. A no-change run checks for a published Windows update manifest and
+can recover a missing release, without duplicating a running build. This is a tested integration
+pipeline, not a promise of conflict-free upstream merges; failed CI runs require attention.
+
+New installations use the release-tested runtime versions. With automatic updates enabled,
+starting the server upgrades older Open WebUI installations to the version carried by the
+desktop release. Explicit user pins, disabled updates, and newer/custom runtimes are preserved.
+Runtime upgrades still require package-registry access; on failure the existing runtime starts
+and the failure is logged. The runtime version remains visible in Open WebUI.
 
 ## Supported connector types
 

@@ -60,7 +60,7 @@ test('a local workspace sets the terminal for this request', () => {
   )
 
   assert.equal(out.terminal_id, 'desktop-ws-abc123')
-  assert.deepEqual(out.tool_ids, [...CONNECTORS, 'server:desktop-workspace-desktop-ws-abc123'])
+  assert.deepEqual(out.tool_ids, ['server:desktop-workspace-desktop-ws-abc123', ...CONNECTORS])
   assert.ok(
     (out.messages as Array<Record<string, string>>).some((message) =>
       message.content.includes('[desktop-local-workspace]')
@@ -101,6 +101,45 @@ test('the local workspace tool server is never added twice', () => {
   )
 
   assert.equal((out.tool_ids as string[]).filter((id) => id === workspaceToolId).length, 1)
+})
+
+test('filesystem functions survive a router truncating a large connector to 128 tools', () => {
+  const id = 'server:desktop-workspace-desktop-ws-test'
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: CONNECTORS },
+    patch({ selection: { mode: 'local', terminalId: 'desktop-ws-test' } })
+  )
+  // Same ordered OpenAPI expansion used by Open WebUI, followed by OmniRoute's
+  // default prefix limit. Previously every surviving function was Garmin.
+  const specs = (out.tool_ids as string[])
+    .flatMap((server) =>
+      server === id
+        ? ['write_file', 'read_file', 'list_files', 'run_command']
+        : Array.from({ length: 200 }, (_, index) => `${server}_${index}`)
+    )
+    .slice(0, 128)
+  for (const name of ['write_file', 'read_file', 'list_files', 'run_command']) {
+    assert.ok(specs.includes(name), `${name} must reach the model`)
+  }
+})
+
+test('switching or detaching a workspace removes old filesystem servers', () => {
+  const first = applyWorkspaceToPayload(
+    { messages: userTurn() },
+    patch({
+      selection: { mode: 'local', terminalId: 'desktop-ws-first' }
+    })
+  )
+  const second = applyWorkspaceToPayload(
+    first,
+    patch({
+      selection: { mode: 'local', terminalId: 'desktop-ws-second' }
+    })
+  )
+  assert.deepEqual(second.tool_ids, ['server:desktop-workspace-desktop-ws-second', ...CONNECTORS])
+  const detached = applyWorkspaceToPayload(second, patch())
+  assert.deepEqual(detached.tool_ids, CONNECTORS)
+  assert.ok(!('terminal_id' in detached))
 })
 
 // ─── Cloud workspace ────────────────────────────────────

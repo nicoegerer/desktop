@@ -3,10 +3,11 @@ name: Sync Official Upstream
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * 1'
+    - cron: '0 6 * * *'
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: sync-upstream
@@ -15,12 +16,19 @@ jobs:
   sync:
     name: Mirror upstream and publish Services Edition update
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout release history
         uses: actions/checkout@v4
         with:
           ref: release
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
 
       - name: Configure git
         run: |
@@ -33,44 +41,35 @@ jobs:
           git fetch upstream main
           git fetch origin main managed-services release
 
-      - name: Keep main as an exact upstream mirror
+      - name: Prepare release candidate from both official projects
+        id: candidate
         run: |
-          git checkout -B main origin/main
-          if ! git merge --ff-only upstream/main; then
-            echo "::error::main diverged from upstream. Keep fork changes on managed-services; main was not overwritten."
-            exit 1
-          fi
-          git push origin main
+          BACKEND_TAG=$(gh release view --repo open-webui/open-webui --json tagName --jq .tagName)
+          node .github/scripts/prepare-upstream-sync.mjs "$BACKEND_TAG"
 
-      - name: Merge upstream into managed-services
-        id: feature
+      - name: Verify candidate before publishing any branch
+        if: steps.candidate.outputs.changed == 'true'
         run: |
-          git checkout -B managed-services origin/managed-services
-          BEFORE=$(git rev-parse HEAD)
-          if ! git merge --no-edit upstream/main; then
-            git merge --abort
-            echo "::error::Upstream conflicts with managed-services. Resolve the conflict on the feature branch; no release was changed."
-            exit 1
-          fi
-          AFTER=$(git rev-parse HEAD)
-          if [ "$BEFORE" = "$AFTER" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Already current with official upstream."
-          else
-            git push origin managed-services
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
+          npm ci
+          npm run test:ipc
+          npm run build
+          python .github/scripts/check-runtime-contract.py
 
-      - name: Merge feature and prepare one release commit
-        if: steps.feature.outputs.changed == 'true'
+      - name: Publish branches atomically (never force)
         run: |
-          git checkout -B release origin/release
-          if ! git merge --no-edit managed-services; then
-            git merge --abort
-            echo "::error::The release branch conflicts with managed-services. No partial release was pushed."
-            exit 1
+          git push --atomic origin upstream/main:main HEAD:managed-services HEAD:release
+
+      - name: Explicitly start release, or recover a missing release
+        env:
+          VERSION: ${{ steps.candidate.outputs.version }}
+          CHANGED: ${{ steps.candidate.outputs.changed }}
+        run: |
+          # GITHUB_TOKEN pushes do not trigger on:push workflows.
+          if [ "$CHANGED" = "true" ]; then
+            gh workflow run release.yml --ref release
+          elif ! gh release view "v$VERSION" --json assets --jq '.assets[].name' | grep -qx 'latest.yml'; then
+            ACTIVE=$(gh run list --workflow release.yml --branch release --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$ACTIVE" = "0" ]; then
+              gh workflow run release.yml --ref release
+            fi
           fi
-          VERSION=$(node .github/scripts/bump-services-version.mjs)
-          git add package.json package-lock.json CHANGELOG.md
-          git commit -m "chore: release v$VERSION"
-          git push origin release

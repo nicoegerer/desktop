@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.26] - 2026-09-07
+
+### Fixed
+
+- Prioritize the selected local workspace's file tools before connector catalogs. Garmin's
+  135 functions previously filled OmniRoute's default 128-tool limit, removing all file tools.
+- Remove stale workspace tool IDs when switching or detaching folders. Ask the model to save
+  generated files with file tools and verify their contents instead of returning copy-only code.
+- Sync both official Desktop commits and Open WebUI backend releases daily, preserve release-only
+  fixes on the default branch, and explicitly dispatch the release build after bot pushes.
+- Test merge conflicts, backend-only updates, monotonic versions, and the real published runtime's
+  tool ordering before publishing. Push branches atomically and recover missing releases.
+
+### Changed
+
+- Include Open WebUI **0.11.3** and Open Terminal **0.11.34** as release-tested runtime versions.
+  Older unpinned backends upgrade on server startup; pins, disabled updates and newer versions
+  are preserved. Create a consistent SQLite backup before upgrading the backend.
+
 ## [0.0.20-services.25] - 2026-08-28
 
 ### Fixed
