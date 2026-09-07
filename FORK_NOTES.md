@@ -47,13 +47,21 @@ This is an accidental-write safeguard, **not an OS sandbox**: shell commands sti
 the desktop user's permissions. No installed upstream package is patched. The resource is
 unpacked beside the application's ASAR and retained across backend runtime upgrades.
 
+On Windows, the launcher supplies a missing standard-library import used by Open Terminal
+0.11.34's HTTP error handlers. This happens only after CLI configuration and before the
+application loads; an existing upstream binding is never overwritten. It preserves the
+recoverable workspace-mismatch response without changing the installed package or handlers.
+
 Automatic connectors and workspace servers are omitted from the optional chat-tool picker
 by their IDs, not disabled or deleted. Custom tools remain selectable. Completion requests
 continue to include the default connectors, with the active filesystem first.
 
-Release and upstream-sync gates check the published frontend stores, per-chat cwd API and
-filesystem mutation signatures. Local verification can also exercise the real installed
-Open Terminal using `python -B tests/test_workspace_write_guard.py --real`.
+Release and upstream-sync gates check the published frontend stores, per-chat cwd API,
+filesystem mutation signatures and deferred CLI application import. Local verification can
+also exercise the real installed Open Terminal and HTTP routes using
+`python -B tests/test_workspace_write_guard.py --real --real-http`.
+The Windows x64 packaging job installs that release's pinned Open Terminal runtime and
+requires this real HTTP suite to pass before producing its installer.
 
 ## Supported connector types
 

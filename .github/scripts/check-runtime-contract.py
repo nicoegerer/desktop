@@ -105,6 +105,22 @@ middleware = webui.read('open_webui/utils/middleware.py').decode()
 assert "form_data.pop('terminal_id'" in middleware or 'form_data.pop("terminal_id"' in middleware
 assert 'get_terminal_tools(' in middleware and 'get_tools(' in middleware
 terminal = published_wheel('open-terminal', VERSIONS['openTerminal'])
+terminal_cli = ast.parse(terminal.read('open_terminal/cli.py').decode())
+# The compatibility hook must run after CLI configuration and immediately before
+# the official application import. Reject an incompatible upstream launch path.
+server_calls = [
+    node for node in ast.walk(terminal_cli)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    and isinstance(node.func.value, ast.Name) and node.func.value.id == 'uvicorn'
+    and node.func.attr == 'run'
+]
+assert server_calls, 'Open Terminal CLI no longer calls uvicorn.run'
+for call in server_calls:
+    app_argument = call.args[0] if call.args else next(
+        (keyword.value for keyword in call.keywords if keyword.arg == 'app'), None)
+    assert isinstance(app_argument, ast.Constant) and app_argument.value == 'open_terminal.main:app', (
+        'Open Terminal CLI application import contract changed')
+print('Published terminal CLI: deferred HTTP compatibility hook verified')
 terminal_source = terminal.read('open_terminal/main.py').decode()
 terminal_tree = ast.parse(terminal_source)
 filesystem = ast.parse(terminal.read('open_terminal/utils/fs.py').decode())

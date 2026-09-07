@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.28] - 2026-09-07
+
+### Fixed
+
+- Preserve an actionable workspace-mismatch response through Open Terminal's HTTP layer.
+  The Windows error handler could turn the rejected write into an opaque server error;
+  the write itself was already blocked in `.27`.
+
+### Tests
+
+- Cover the real HTTP write/error path in addition to direct filesystem-method tests.
+- Gate every Windows x64 release on these HTTP regressions against its pinned Open Terminal runtime.
+
 ## [0.0.20-services.27] - 2026-09-07
 
 ### Fixed

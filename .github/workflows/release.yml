@@ -80,6 +80,23 @@ jobs:
             - name: Install Dependencies
               run: npm ci
 
+            - name: Setup Python for Windows HTTP regression
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+
+            - name: Test installed Windows filesystem HTTP routes
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              timeout-minutes: 15
+              shell: pwsh
+              run: |
+                  $terminalVersion = (Get-Content -Raw src/shared/runtime-versions.json | ConvertFrom-Json).openTerminal
+                  python -m pip install --disable-pip-version-check "open-terminal==$terminalVersion"
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  python -B tests/test_workspace_write_guard.py --real --real-http -v
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
             - name: Download Compiled Output
               uses: actions/download-artifact@v4
               with:

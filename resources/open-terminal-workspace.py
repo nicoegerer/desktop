@@ -5,6 +5,7 @@ shell commands still have the desktop user's permissions. Reads are unchanged.
 No installed package is modified, so runtime upgrades retain this behavior.
 """
 import functools
+import importlib
 import inspect
 import os
 
@@ -64,7 +65,30 @@ def install_workspace_write_guard(root, filesystem_type=None, error_type=None):
         setattr(filesystem_type, name, wrap(getattr(filesystem_type, name), parameters))
 
 
+def install_http_error_compatibility(server):
+    """Keep official HTTP errors intact on Windows without editing the runtime.
+
+    Open Terminal 0.11.34 imports subprocess after fcntl in a POSIX-only try
+    block, but its file error handlers use subprocess on every platform. Bind
+    the missing standard-library module only after the CLI has initialized its
+    config, cwd and API key, immediately before Uvicorn loads the application.
+    Existing bindings, upstream handlers and server arguments stay unchanged.
+    """
+    original_run = server.run
+
+    @functools.wraps(original_run)
+    def run(app, *args, **kwargs):
+        if app == 'open_terminal.main:app':
+            api = importlib.import_module('open_terminal.main')
+            if not hasattr(api, 'subprocess'):
+                api.subprocess = importlib.import_module('subprocess')
+        return original_run(app, *args, **kwargs)
+
+    server.run = run
+
+
 if __name__ == '__main__':
     install_workspace_write_guard(os.environ.get('OPEN_WEBUI_DESKTOP_WORKSPACE_ROOT'))
-    from open_terminal.cli import main
-    main()
+    from open_terminal import cli
+    install_http_error_compatibility(cli.uvicorn)
+    cli.main()
