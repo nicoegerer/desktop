@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.29] - 2026-09-07
+
+### Fixed
+
+- Stage one canonical file per release-asset name before uploading. Architecture-specific
+  files come from their matching package, avoiding duplicate macOS ZIP/Blockmap upload races.
+- Recalculate update-manifest hashes and sizes from those exact staged files. Missing files,
+  version mismatches and ambiguous differing duplicates stop publication.
+- Retain producer-specific blockmap metadata and the dedicated Linux ARM64 update manifest.
+
+### Tests
+
+- Add asset-selection and manifest-integrity regressions to the standard test suite.
+- Retain all workspace, Windows HTTP and strict release-dependency checks from `.27` and `.28`.
+
 ## [0.0.20-services.28] - 2026-09-07
 
 ### Fixed

@@ -23,6 +23,11 @@ another push workflow. A no-change run checks for a published Windows update man
 can recover a missing release, without duplicating a running build. This is a tested integration
 pipeline, not a promise of conflict-free upstream merges; failed CI runs require attention.
 
+Release uploads use a fresh staging directory containing one canonical file per asset name.
+Architecture-specific duplicates are resolved against the matching package; ambiguous,
+different files fail closed. Update manifests are hashed against those exact staged files.
+Every packaging job, including the Windows HTTP gate, must succeed before publication.
+
 New installations use the release-tested runtime versions. With automatic updates enabled,
 starting the server upgrades older Open WebUI installations to the version carried by the
 desktop release. Explicit user pins, disabled updates, and newer/custom runtimes are preserved.
