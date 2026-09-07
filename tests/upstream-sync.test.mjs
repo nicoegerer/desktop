@@ -113,3 +113,19 @@ test('workflow explicitly dispatches releases and keeps the default branch curre
   assert.ok(source.includes('--repo open-webui/open-webui'))
   assert.ok(source.indexOf('npm run test:ipc') < source.indexOf('git push --atomic'))
 })
+
+test('every gh operation targets an explicit repository after adding upstream', () => {
+  const source = readFileSync(
+    new URL('../.github/workflows/sync-upstream.yml', import.meta.url),
+    'utf8'
+  )
+  const commands = source.split('\n').filter((line) => /\bgh (release|workflow|run) /.test(line))
+  assert.equal(commands.length, 5)
+  for (const command of commands) {
+    assert.ok(
+      command.includes('--repo open-webui/open-webui') ||
+        command.includes('--repo "$GITHUB_REPOSITORY"'),
+      `GitHub command may select the upstream repository: ${command}`
+    )
+  }
+})

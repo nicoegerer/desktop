@@ -65,11 +65,13 @@ jobs:
           CHANGED: ${{ steps.candidate.outputs.changed }}
         run: |
           # GITHUB_TOKEN pushes do not trigger on:push workflows.
+          # Adding an upstream remote changes gh's inferred default repository.
+          # Every fork operation must explicitly target this workflow's repository.
           if [ "$CHANGED" = "true" ]; then
-            gh workflow run release.yml --ref release
-          elif ! gh release view "v$VERSION" --json assets --jq '.assets[].name' | grep -qx 'latest.yml'; then
-            ACTIVE=$(gh run list --workflow release.yml --branch release --json status --jq '[.[] | select(.status != "completed")] | length')
+            gh workflow run release.yml --ref release --repo "$GITHUB_REPOSITORY"
+          elif ! gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx 'latest.yml'; then
+            ACTIVE=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch release --json status --jq '[.[] | select(.status != "completed")] | length')
             if [ "$ACTIVE" = "0" ]; then
-              gh workflow run release.yml --ref release
+              gh workflow run release.yml --ref release --repo "$GITHUB_REPOSITORY"
             fi
           fi
