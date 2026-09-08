@@ -2180,7 +2180,9 @@ if (!gotTheLock) {
     // be deleted or moved.
     let workspaceKeepRevision = 0
     const workspaceRegistrationIds = (): string[] => [
-      ...listWorkspaceTerminals().map((terminal) => terminal.id),
+      ...listWorkspaceTerminals()
+        .filter((terminal) => terminal.status === 'started')
+        .map((terminal) => terminal.id),
       ...listGithubMounts().map((mount) => mount.id)
     ]
     ipcMain.handle('workspace:chip:keep-alive', async (_event, keep: string[]) => {

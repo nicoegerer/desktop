@@ -125,6 +125,7 @@ const run = (
     fetch?: (url: unknown, init: unknown) => Promise<unknown>
     counterCount?: number
     terminalDisabled?: boolean
+    keepAlive?: (ids: string[]) => Promise<unknown>
   } = {}
 ): Harness => {
   const calls: Array<{ url: string; body: unknown }> = []
@@ -269,6 +270,8 @@ const run = (
     electronAPI: {
       send: (data: Record<string, unknown>) => {
         bridge.push(data)
+        if (data.type === 'workspaceKeepAlive' && options.keepAlive)
+          return options.keepAlive(data.ids as string[])
         if ((data.type === 'workspaceEnsure' || data.type === 'workspaceMountRepo') && ensureResult)
           return Promise.resolve(ensureResult)
         return Promise.resolve(null)
@@ -485,6 +488,35 @@ test('every provisional keep-alive includes the old request workspace after swit
     JSON.parse(h.storage()['desktop:workspace-requests'])[0].terminalId,
     'desktop-ws-old'
   )
+})
+
+test('reopening a released workspace starts it again instead of trusting the old ready cache', async () => {
+  let registered = ['desktop-ws-old']
+  const value = {
+    mode: 'local',
+    terminalId: 'desktop-ws-old',
+    label: 'old',
+    path: 'C:/fixture/old'
+  }
+  const h = run(
+    { 'chat-123': value, saved: value },
+    '/c/chat-123',
+    {
+      ok: true,
+      terminal: { id: 'desktop-ws-old', name: 'old' }
+    },
+    { keepAlive: async () => ({ ok: true, ids: [...registered] }) }
+  )
+  await h.settle()
+  assert.equal(h.bridge.filter((call) => call.type === 'workspaceEnsure').length, 1)
+  registered = []
+  await h.changeWorkspace(async () => null)
+  await h.settle()
+  registered = ['desktop-ws-old']
+  h.navigate('/c/saved')
+  await h.settle()
+  assert.equal(h.bridge.filter((call) => call.type === 'workspaceEnsure').length, 2)
+  assert.equal(h.selectedTerminalId(), 'desktop-ws-old')
 })
 
 test('the technical terminal cloud is hidden both idle and while generation disables its dropdown', async () => {

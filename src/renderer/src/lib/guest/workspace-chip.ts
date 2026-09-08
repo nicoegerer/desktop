@@ -94,6 +94,20 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
    * that, because the selections live per conversation in this store — and a
    * workspace nobody points at keeps a handle on its folder for nothing.
    */
+  var reconcileRegisteredWorkspaces = function (result) {
+    if (!result || !result.ok || !Array.isArray(result.ids)) return;
+    var selected = selection();
+    var restore = false;
+    Object.keys(readyTerminals).forEach(function (id) {
+      if (result.ids.indexOf(id) !== -1) return;
+      delete readyTerminals[id];
+      if (selected && selected.terminalId === id) {
+        appliedSelection = '';
+        restore = true;
+      }
+    });
+    if (restore) scheduleRender();
+  };
   var reportLiveWorkspaces = function (extra) {
     var all = readAll();
     var ids = [];
@@ -115,6 +129,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     // First reserve everything while async task inspection is in progress.
     ask('workspaceKeepAlive', { ids: ids }).then(function (result) {
       if (!result || !result.ok || !Array.isArray(result.ids)) return;
+      reconcileRegisteredWorkspaces(result);
       return resolveWorkspaceKeepIds({
         selections: all, currentKey: currentKey,
         extraId: extra && extra.terminalId,
@@ -140,7 +155,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
           workspaceRequests = remaining;
           saveWorkspaceRequests();
         }
-        return ask('workspaceKeepAlive', { ids: wanted });
+        return ask('workspaceKeepAlive', { ids: wanted }).then(reconcileRegisteredWorkspaces);
       });
     }).catch(function () { /* inspection failure must never interrupt work */ });
   };
