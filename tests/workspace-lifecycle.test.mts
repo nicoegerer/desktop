@@ -49,6 +49,33 @@ test('one active chat keeps a shared workspace; failed status inspection is cons
   assert.deepEqual(new Set(keep), new Set(['shared', 'failed']))
 })
 
+test('switching a chat during a long answer preserves that answer original workspace until it finishes', async () => {
+  const options = {
+    selections: { chat: { terminalId: 'new-folder' } },
+    currentKey: 'chat',
+    registeredIds: ['new-folder', 'old-folder'],
+    requests: [{ chatId: 'chat', terminalId: 'old-folder' }]
+  }
+  assert.deepEqual(
+    new Set(await resolveWorkspaceKeepIds({ ...options, hasRunningChat: async () => true })),
+    new Set(['old-folder', 'new-folder'])
+  )
+  assert.deepEqual(
+    await resolveWorkspaceKeepIds({ ...options, hasRunningChat: async () => false }),
+    ['new-folder']
+  )
+  assert.deepEqual(
+    new Set(
+      await resolveWorkspaceKeepIds({
+        ...options,
+        requests: [{ chatId: 'draft', terminalId: 'old-folder' }],
+        hasRunningChat: async () => false
+      })
+    ),
+    new Set(['old-folder', 'new-folder'])
+  )
+})
+
 test('large chat histories have a bounded status lookup and retain uninspected workspaces', async () => {
   let calls = 0
   const selections = Object.fromEntries(

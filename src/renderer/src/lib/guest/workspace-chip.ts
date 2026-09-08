@@ -71,7 +71,13 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var adopted = null;
     if (!all[key] && temporaryChat(lastChatKey) && !temporaryChat(key)) {
       adopted = pendingSelection || all.draft || null;
-      if (adopted) all[key] = adopted;
+      if (adopted) {
+        all[key] = adopted;
+        workspaceRequests.forEach(function (request) {
+          if (temporaryChat(request.chatId)) request.chatId = key;
+        });
+        saveWorkspaceRequests();
+      }
     }
     if (pendingSourceKey && temporaryChat(pendingSourceKey) && pendingSourceKey !== key) delete all[pendingSourceKey];
     if (key !== 'draft') delete all.draft;
@@ -101,6 +107,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     if (extra && extra.terminalId && ids.indexOf(extra.terminalId) === -1) {
       ids.push(extra.terminalId);
     }
+    workspaceRequests.forEach(function (request) {
+      if (ids.indexOf(request.terminalId) === -1) ids.push(request.terminalId);
+    });
     var revision = ++workspaceReportRevision;
     var currentKey = chatKey();
     // First reserve everything while async task inspection is in progress.
@@ -110,9 +119,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         selections: all, currentKey: currentKey,
         extraId: extra && extra.terminalId,
         registeredIds: result.ids,
-        leasedIds: Object.keys(workspaceRequestLeases).filter(function (id) {
-          return workspaceRequestLeases[id] > Date.now();
-        }),
+        requests: workspaceRequests,
+        leasedIds: workspaceRequests.filter(function (request) {
+          return request.until > Date.now();
+        }).map(function (request) { return request.terminalId; }),
         hasRunningChat: async function (key) {
           var token = localStorage.getItem('token');
           if (!token) return null;
@@ -125,12 +135,26 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         }
       }).then(function (wanted) {
         if (revision !== workspaceReportRevision || currentKey !== chatKey()) return;
+        var remaining = workspaceRequests.filter(function (request) { return wanted.indexOf(request.terminalId) !== -1; });
+        if (remaining.length !== workspaceRequests.length) {
+          workspaceRequests = remaining;
+          saveWorkspaceRequests();
+        }
         return ask('workspaceKeepAlive', { ids: wanted });
       });
     }).catch(function () { /* inspection failure must never interrupt work */ });
   };
   var workspaceReportRevision = 0;
-  var workspaceRequestLeases = {};
+  var workspaceRequests = [];
+  try {
+    var restoredRequests = JSON.parse(localStorage.getItem('desktop:workspace-requests') || '[]');
+    if (Array.isArray(restoredRequests)) workspaceRequests = restoredRequests.filter(function (request) {
+      return request && typeof request.chatId === 'string' && typeof request.terminalId === 'string';
+    });
+  } catch (_) {}
+  var saveWorkspaceRequests = function () {
+    try { localStorage.setItem('desktop:workspace-requests', JSON.stringify(workspaceRequests)); } catch (_) {}
+  };
   var saveSelection = function (value, key) {
     var all = readAll();
     key = key || chatKey();
@@ -260,7 +284,12 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
               pendingSourceKey = requestKey;
             }
             if (readySelection && readySelection.terminalId) {
-              workspaceRequestLeases[readySelection.terminalId] = Date.now() + 60000;
+              var boundChat = typeof originalBody.chat_id === 'string' && originalBody.chat_id ? originalBody.chat_id : requestKey;
+              workspaceRequests = workspaceRequests.filter(function (request) {
+                return request.chatId !== boundChat || request.terminalId !== readySelection.terminalId;
+              });
+              workspaceRequests.push({ chatId: boundChat, terminalId: readySelection.terminalId, until: Date.now() + 60000 });
+              saveWorkspaceRequests();
             }
             reportLiveWorkspaces();
             var patched = applyWorkspaceToPayload(originalBody, {

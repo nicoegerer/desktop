@@ -7,6 +7,7 @@ export async function resolveWorkspaceKeepIds(options: {
   extraId?: string
   registeredIds: string[]
   leasedIds?: string[]
+  requests?: Array<{ chatId: string; terminalId: string }>
   hasRunningChat: (chatId: string) => Promise<boolean | null>
 }): Promise<string[]> {
   const keep = new Set<string>()
@@ -19,6 +20,17 @@ export async function resolveWorkspaceKeepIds(options: {
   }
   const registered = new Set(options.registeredIds)
   const groups = new Map<string, string[]>()
+  // A chat's selection can change while an earlier turn still uses its old
+  // terminal. Track the request binding separately from the current selection.
+  for (const request of options.requests ?? []) {
+    if (!request.terminalId || !registered.has(request.terminalId) || keep.has(request.terminalId))
+      continue
+    if (request.chatId === 'draft' || request.chatId === 'new') {
+      keep.add(request.terminalId) // unknown chat identity must not interrupt work
+    } else {
+      groups.set(request.terminalId, [...(groups.get(request.terminalId) ?? []), request.chatId])
+    }
+  }
   for (const [chat, selection] of Object.entries(options.selections)) {
     const id = selection?.terminalId
     if (!id || keep.has(id) || !registered.has(id)) continue

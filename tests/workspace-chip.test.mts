@@ -461,6 +461,32 @@ test('a workspace change cannot open the available-tools dialog', async () => {
   assert.equal(h.nativeClicks().tools, 0)
 })
 
+test('every provisional keep-alive includes the old request workspace after switching folders', async () => {
+  const h = run({ 'chat-123': { mode: 'local', terminalId: 'desktop-ws-old', label: 'old' } })
+  const fetch = h.window.fetch as (url: string, init?: unknown) => Promise<unknown>
+  await fetch('/api/chat/completions', {
+    method: 'POST',
+    body: JSON.stringify({
+      chat_id: 'chat-123',
+      messages: [{ role: 'user', content: 'create a website' }]
+    })
+  })
+  const beforeSwitch = h.bridge.length
+  await h.changeWorkspace(async () => ({
+    mode: 'local',
+    terminalId: 'desktop-ws-new',
+    label: 'new'
+  }))
+  await h.settle()
+  const reports = h.bridge.slice(beforeSwitch).filter((call) => call.type === 'workspaceKeepAlive')
+  assert.ok(reports.length > 0)
+  for (const report of reports) assert.ok((report.ids as string[]).includes('desktop-ws-old'))
+  assert.equal(
+    JSON.parse(h.storage()['desktop:workspace-requests'])[0].terminalId,
+    'desktop-ws-old'
+  )
+})
+
 test('the technical terminal cloud is hidden both idle and while generation disables its dropdown', async () => {
   for (const terminalDisabled of [false, true]) {
     const h = run(
