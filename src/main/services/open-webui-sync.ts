@@ -183,7 +183,7 @@ export const syncOpenWebUI = async (
     apiKey: mount.apiKey
   }))
   const terminals = [...localTerminals, ...cloudTerminals]
-  const toolTargets = [...connectorTargets, ...localTerminals.map(workspaceTerminalToolTarget)]
+  const toolTargets = [...connectorTargets, ...terminals.map(workspaceTerminalToolTarget)]
 
   const currentTools = await readConfig(baseUrl, token, 'tool_servers', 'TOOL_SERVER_CONNECTIONS')
   if (currentTools === 'forbidden') {

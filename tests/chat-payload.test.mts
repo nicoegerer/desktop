@@ -158,12 +158,13 @@ test('a cloud workspace names the repository and keeps its mounted terminal', ()
   )
 
   assert.equal(out.terminal_id, 'desktop-gh-test1')
-  assert.ok(!(out.tool_ids as string[]).some((id) => id.startsWith('server:desktop-workspace-')))
+  assert.deepEqual(out.tool_ids, ['server:desktop-workspace-desktop-gh-test1', ...CONNECTORS])
   const messages = out.messages as Array<Record<string, string>>
   assert.equal(messages[0].role, 'system')
   assert.ok(messages[0].content.includes('nicoegerer/test1'))
   assert.ok(messages[0].content.includes('`main`'))
-  assert.ok(messages[0].content.includes('mounted repository'))
+  assert.ok(messages[0].content.includes('write_file'))
+  assert.ok(messages[0].content.includes('commit'))
   assert.equal(messages[1].role, 'user')
 })
 
@@ -179,6 +180,28 @@ test('the instruction is placed after the existing system prompt, not before it'
   assert.equal(messages[0].content, 'Antworte auf Deutsch.')
   assert.ok(messages[1].content.includes(CLOUD_INSTRUCTION_MARKER))
   assert.equal(messages[2].role, 'user')
+})
+
+test('scoped cloud file writes survive large always-on connector catalogs', () => {
+  const out = applyWorkspaceToPayload(
+    { messages: userTurn(), tool_ids: CONNECTORS },
+    patch({
+      selection: {
+        mode: 'cloud',
+        repoFullName: 'example/site',
+        branch: 'main',
+        terminalId: 'desktop-gh-site'
+      }
+    })
+  )
+  const names = (out.tool_ids as string[])
+    .flatMap((id) =>
+      id === 'server:desktop-workspace-desktop-gh-site'
+        ? ['list_files', 'read_file', 'write_file']
+        : Array.from({ length: 200 }, (_, i) => id + '_' + i)
+    )
+    .slice(0, 128)
+  for (const name of ['list_files', 'read_file', 'write_file']) assert.ok(names.includes(name))
 })
 
 test('switching workspace mid-chat does not stack instructions', () => {

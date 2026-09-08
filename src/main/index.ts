@@ -92,6 +92,7 @@ import {
 import { initializeManagedServices, getManagedServicesManager } from './services'
 import { WorkspacePreviewError, WorkspacePreviewManager } from './services/workspace-preview'
 import { createWorkspacePreviewHandlers } from './services/workspace-preview-ipc'
+import { canReleaseWorkspaceTerminal } from '../shared/services/workspace-lifecycle'
 import {
   getWorkspacePreviewRequestHeaders,
   isWorkspacePreviewNavigationAllowed
@@ -2177,7 +2178,13 @@ if (!gotTheLock) {
     // desktop only knows which terminals it started. Anything no longer
     // referenced is stopped, so an unused folder stops being held open and can
     // be deleted or moved.
+    let workspaceKeepRevision = 0
+    const workspaceRegistrationIds = (): string[] => [
+      ...listWorkspaceTerminals().map((terminal) => terminal.id),
+      ...listGithubMounts().map((mount) => mount.id)
+    ]
     ipcMain.handle('workspace:chip:keep-alive', async (_event, keep: string[]) => {
+      const revision = ++workspaceKeepRevision
       try {
         const wanted = new Set(
           Array.isArray(keep) ? keep.filter((id) => typeof id === 'string') : []
@@ -2186,13 +2193,32 @@ if (!gotTheLock) {
         // workspace. An empty draft chat must never stop the process that the
         // user explicitly asked to run at application startup.
         const config = await getConfig()
+        if (revision !== workspaceKeepRevision) return { ok: true, ids: workspaceRegistrationIds() }
         const serviceCwd = config.openTerminal?.enabled ? config.openTerminal?.cwd : ''
         if (serviceCwd) wanted.add(workspaceTerminalId(serviceCwd))
         const unmounted = unmountGithubRepos(wanted)
         const stopped: string[] = []
         for (const terminal of listWorkspaceTerminals()) {
+          if (revision !== workspaceKeepRevision) break
           if (wanted.has(terminal.id)) continue
+          if (terminal.status === 'starting') continue
+          const terminated = terminal.status === 'stopped' || terminal.status === 'failed'
+          if (
+            !terminated &&
+            (!terminal.url ||
+              !terminal.apiKey ||
+              !(await canReleaseWorkspaceTerminal((route) =>
+                fetch(terminal.url + route, {
+                  headers: { Authorization: 'Bearer ' + terminal.apiKey },
+                  signal: AbortSignal.timeout(5000)
+                })
+              )))
+          )
+            continue
+          // A newer selection may have arrived while the idle probe was pending.
+          if (revision !== workspaceKeepRevision) break
           await workspacePreview.releaseTerminal(terminal.id)
+          if (revision !== workspaceKeepRevision) break
           await stopWorkspaceTerminal(terminal.cwd)
           await setWorkspaceActive(terminal.cwd, false)
           stopped.push(terminal.cwd)
@@ -2206,15 +2232,14 @@ if (!gotTheLock) {
           if (!listWorkspaceTerminals().length) sendToRenderer('status:open-terminal', 'stopped')
           await syncOpenWebUI()
         }
-        return { ok: true, stopped: stopped.length }
+        return { ok: true, stopped: stopped.length, ids: workspaceRegistrationIds() }
       } catch (cause) {
         return chipError(cause)
       }
     })
 
-    // A cloud workspace is browsable without a checkout: the repository is
-    // mounted read-only and registered as a terminal server, so the file panel
-    // has something to show. Writing stays with the GitHub connector.
+    // A cloud workspace needs no checkout: its scoped file tools read and commit
+    // to the selected repository and branch, while the terminal entry serves FileNav.
     ipcMain.handle(
       'workspace:chip:cloud',
       async (_event, repo: { repoFullName: string; branch: string }) => {

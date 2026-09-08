@@ -23,6 +23,34 @@ assert.equal(result.tool_ids[0], 'server:desktop-workspace-desktop-ws-build-chec
 assert.equal(result.terminal_id, 'desktop-ws-build-check')
 assert.ok(result.messages[0].content.includes('write_file'))
 assert.ok(result.messages[0].content.includes('CURRENT workspace for THIS turn'))
+const cloud = apply(
+  { messages: [] },
+  {
+    selection: {
+      mode: 'cloud',
+      terminalId: 'desktop-gh-check',
+      repoFullName: 'example/site',
+      branch: 'main'
+    },
+    alwaysOnToolIds: ['server:garmin']
+  }
+)
+assert.equal(cloud.tool_ids[0], 'server:desktop-workspace-desktop-gh-check')
+assert.ok(cloud.messages[0].content.includes('write_file'))
+const lifecycleStart = bundle.indexOf('async function resolveWorkspaceKeepIds(')
+assert.ok(lifecycleStart >= 0, 'Workspace cleanup resolver must be bundled')
+const lifecycleEnd = bundle.indexOf('\n}\n', lifecycleStart) + 2
+assert.ok(lifecycleEnd > lifecycleStart)
+const keep = new Function('return (' + bundle.slice(lifecycleStart, lifecycleEnd) + ')')()
+assert.deepEqual(
+  await keep({
+    selections: { current: { terminalId: 'selected' }, old: { terminalId: 'old' } },
+    currentKey: 'current',
+    registeredIds: ['selected', 'old'],
+    hasRunningChat: async () => false
+  }),
+  ['selected']
+)
 const bridgeStart = bundle.indexOf('function createTerminalStoreBridge(')
 assert.ok(bridgeStart >= 0, 'Terminal store bridge must be bundled')
 const bridgeEnd = bundle.indexOf('\n}\n', bridgeStart) + 2

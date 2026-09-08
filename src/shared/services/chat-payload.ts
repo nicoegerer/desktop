@@ -70,7 +70,7 @@ export function applyWorkspaceToPayload(
   // Remove old workspace ids first: switching/detaching must not retain access
   // to a previously selected folder through the fallback OpenAPI server.
   const toolIds: string[] = []
-  if (selection?.mode === 'local' && selection.terminalId) {
+  if (selection?.terminalId) {
     toolIds.push(`server:desktop-workspace-${selection.terminalId}`)
   }
   for (const id of [...existingToolIds, ...alwaysOn]) {
@@ -140,9 +140,14 @@ export function applyWorkspaceToPayload(
       String(selection.repoFullName ?? '') +
       '` on branch `' +
       String(selection.branch ?? '') +
-      '`. Use the active Open Terminal tools to inspect files in the mounted repository. Use the GitHub tools to' +
-      ' modify files, commit, and push changes to that branch when requested. This mount is managed by the' +
-      ' desktop; do not switch to another local folder.'
+      '`. This is the CURRENT workspace for THIS turn; earlier paths and repositories are historical.' +
+      ' Use list_files/read_file to inspect it and write_file to create or replace files directly on this branch.' +
+      ' Each write_file creates a GitHub commit and verifies its contents. When asked to create files, save them' +
+      ' with these tools instead of giving only code to copy. Use repository-relative paths, not Windows paths.' +
+      ' Verify with read_file and report the actual repository, path, branch and commit. Report permission or' +
+      ' conflict errors honestly; never claim a write succeeded without verification.' +
+      ' There is no local checkout or shell. Do not switch to another local folder. Broader GitHub tools remain' +
+      ' available for explicitly requested repository operations.'
 
     const systemIndex = cleaned.findIndex((message) => message && message.role === 'system')
     const entry = { role: 'system', content: instruction }

@@ -44,6 +44,7 @@ interface TerminalInstance {
 
 const instances = new Map<string, TerminalInstance>()
 const startsInFlight = new Map<string, Promise<TerminalInstance>>()
+const stopsInFlight = new Map<string, Promise<boolean>>()
 let activeKey: string | null = null
 
 const comparableCwd = (value: string): string => {
@@ -187,6 +188,9 @@ export const startWorkspaceTerminal = async (
   const workspacePath = String(cwd ?? '').trim()
   if (!workspacePath) throw new Error('A workspace folder is required')
   const key = comparableCwd(workspacePath)
+  // An idle-workspace cleanup may still be releasing the old process. Never
+  // return that dying instance or let its completion delete a newly started one.
+  await stopsInFlight.get(key)
 
   const running = instances.get(key)
   if (running && running.status === 'started' && isProcessAlive(running.pid)) {
@@ -300,32 +304,43 @@ export const startWorkspaceTerminal = async (
 
 export const stopWorkspaceTerminal = async (cwd: string): Promise<boolean> => {
   const key = comparableCwd(cwd)
+  const pending = stopsInFlight.get(key)
+  if (pending) return pending
   const instance = instances.get(key)
   if (!instance) return false
 
-  if (instance.pty) {
-    try {
-      instance.pty.kill()
-    } catch (e) {
-      log.warn('Failed to kill Open Terminal PTY:', e)
-    }
-    await new Promise((r) => setTimeout(r, 1000))
-    if (instance.pid) {
+  instance.status = 'stopping'
+  const stopping = (async (): Promise<boolean> => {
+    if (instance.pty) {
       try {
-        process.kill(instance.pid, 0)
-        process.kill(instance.pid, 'SIGKILL')
-      } catch {
-        // already dead
+        instance.pty.kill()
+      } catch (e) {
+        log.warn('Failed to kill Open Terminal PTY:', e)
+      }
+      await new Promise((r) => setTimeout(r, 1000))
+      if (instance.pid) {
+        try {
+          process.kill(instance.pid, 0)
+          process.kill(instance.pid, 'SIGKILL')
+        } catch {
+          // already dead
+        }
       }
     }
-  }
 
-  instances.delete(key)
-  if (activeKey === key) {
-    const next = [...instances.values()].find((entry) => entry.status === 'started')
-    activeKey = next ? comparableCwd(next.cwd) : null
+    if (instances.get(key) === instance) instances.delete(key)
+    if (activeKey === key) {
+      const next = [...instances.values()].find((entry) => entry.status === 'started')
+      activeKey = next ? comparableCwd(next.cwd) : null
+    }
+    return true
+  })()
+  stopsInFlight.set(key, stopping)
+  try {
+    return await stopping
+  } finally {
+    if (stopsInFlight.get(key) === stopping) stopsInFlight.delete(key)
   }
-  return true
 }
 
 export const stopAllWorkspaceTerminals = async (): Promise<void> => {

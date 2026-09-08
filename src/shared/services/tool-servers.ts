@@ -174,10 +174,8 @@ const terminalEntry = (
 /**
  * Replace desktop-owned terminals and keep everything else.
  *
- * Entries without an id that point at a loopback address are dropped: earlier
- * versions registered the workspace that way, and Open WebUI hides id-less
- * system terminals from the chat, so they are invisible clutter that can be
- * neither selected nor removed from the desktop app.
+ * Only the identifiable id-less legacy desktop entry is dropped. A loopback
+ * address alone is not ownership evidence: users may add their own local tools.
  */
 export const mergeTerminalServers = (
   current: TerminalServerConnection[],
@@ -192,7 +190,11 @@ export const mergeTerminalServers = (
 
     if (!id) {
       const url = typeof entry?.url === 'string' ? entry.url : ''
-      if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?/i.test(url)) continue
+      if (
+        entry.name === 'Local Open Terminal' &&
+        /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(?:\/|$)/i.test(url)
+      )
+        continue
       merged.push(entry)
       continue
     }

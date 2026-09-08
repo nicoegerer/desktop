@@ -79,22 +79,24 @@ Every request from that chat carries both `terminal_id` and the matching workspa
 tool-capable model can create and edit files, run commands, use Git, install dependencies, and execute
 builds and tests there even when Open WebUI omits its special terminal tools for that model.
 
-Several folders can be open at once — one terminal each — and they are reopened on the next launch.
+Several active folders can be open at once — one terminal each. Reopening a conversation restores
+its selection and starts its workspace on demand.
 
 ### Cloud
 
 Pick **Cloud** for a list of the repositories the GitHub connector's token can reach. Selecting one
 makes it the workspace for that conversation **without a checkout**: nothing is cloned.
 
-The repository is mounted read-only and registered as a terminal server, so Open WebUI's file panel
-shows its tree and file contents just as it does for a local folder. The mount serves the browsing
-subset of Open Terminal's file API — `/files/list`, `/files/read`, `/files/cwd`, `/health`, `/info`,
-`/api/config` — against the GitHub contents API, on one loopback server that hosts every repository
-under its own path prefix. Anything that would change the repository answers `405`.
+The mount provides list/read/write file tools scoped to that repository and branch, plus the
+terminal-shaped browsing API used by Open WebUI's Files panel. Each chat request selects this
+toolset ahead of large connector catalogs, so its file tools survive provider tool-count limits.
+The terminal ID selects the file pane, not a shell: cloud mounts cannot execute local commands.
 
-Writing stays with the GitHub connector: the chat request carries a system message naming the
-repository and branch and telling the model to commit through the GitHub tools, and it carries no
-`terminal_id`, so the model is never offered a shell it does not have.
+Saving a text file (up to 1 MB UTF-8) creates a GitHub commit in the selected branch. The tool
+reads the current blob revision, serializes writes on the branch and verifies the committed bytes
+before reporting success. It invalidates the file-list cache after writes. The connector's token
+needs **Contents: read and write** for that repository; branch protections remain in effect.
+No local copy is created, no force push is used, and permission/conflict errors are shown explicitly.
 
 Switching workspace mid-conversation replaces that instruction rather than stacking a second one,
 and switching back to a local folder removes it.
@@ -103,9 +105,17 @@ and switching back to a local folder removes it.
 
 A workspace is started when a conversation asks for one, never on launch. Open Terminal runs with
 the folder as its working directory, so a folder left open would keep a handle on it and could not be
-deleted or moved. The chat reports which workspaces its conversations still point at — that set lives
-per conversation in the page's own storage — and the desktop releases the folders and repository
-mounts nobody references any more.
+deleted or moved. The chat retains the current/pending workspace, recently submitted requests and
+active background answers. Inactive historical selections remain saved, but do not keep a process
+or repository mount registered forever. Unknown activity states are retained conservatively.
+
+The desktop additionally checks for running commands and live PTYs before stopping a process.
+An explicitly configured startup Open Terminal service is protected. Reopening a saved selection
+restarts the workspace, waiting for any shutdown already in progress.
+
+Desktop-managed terminal/tool entries are hidden in Open WebUI's duplicate integration controls;
+use **Services & Connectors** to manage them. Needed connectors such as Garmin remain available
+to every chat. User-owned entries, including id-less local servers, are preserved.
 
 A workspace picked before the first message is carried over when the conversation gets its id, so it
 is not lost the moment it is used.

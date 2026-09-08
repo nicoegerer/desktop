@@ -12,18 +12,22 @@ import {
   toFileEntries
 } from '../../shared/services/github-contents'
 import { githubWorkspaceOpenApi } from '../../shared/services/github-workspace-openapi'
+import {
+  GithubWorkspaceWriter,
+  githubContentsPath,
+  validateGithubScope
+} from '../../shared/services/github-write'
 
 /**
- * A read-only filesystem view of a GitHub repository, served in the shape Open
+ * A scoped filesystem view of a GitHub repository, served in the shape Open
  * WebUI's file browser expects.
  *
  * A cloud workspace has no checkout, so the file panel — which only ever talks
  * to a terminal server — had nothing to show. This serves the subset of Open
  * Terminal's file API that browsing needs, backed by the GitHub contents API.
  *
- * Reads only. Writes stay with the GitHub connector, which already commits
- * properly; a half-implemented write path here would produce commits without
- * the connector's handling of blobs and trees.
+ * Text writes use the Contents API, preserve the expected blob revision, and
+ * verify the immutable commit before reporting success. No local checkout is made.
  *
  * One server hosts every repository. Open WebUI keeps the path of a terminal
  * URL, so each repository is reachable under its own `/r/<slug>` prefix and
@@ -55,6 +59,23 @@ let apiKey = ''
 let tokenResolver: () => string | null = () => null
 const mounts = new Map<string, Mount>()
 const cache = new Map<string, CacheEntry>()
+const githubRequest = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  const token = tokenResolver()
+  if (!token)
+    throw Object.assign(new Error('No GitHub connector token is configured'), { status: 401 })
+  return electronNet.fetch(`${GITHUB_API}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'OpenWebUI-Desktop'
+    },
+    signal: AbortSignal.timeout(20_000)
+  })
+}
+const writer = new GithubWorkspaceWriter(githubRequest)
 
 export const githubMountSlug = (repo: GithubRepoRef): string =>
   crypto
@@ -77,18 +98,7 @@ const githubGet = async (path: string): Promise<unknown> => {
   const cached = cache.get(path)
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.payload
 
-  const token = tokenResolver()
-  if (!token) throw new Error('No GitHub connector token is configured')
-
-  const response = await electronNet.fetch(`${GITHUB_API}${path}`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'OpenWebUI-Desktop'
-    },
-    signal: AbortSignal.timeout(20_000)
-  })
+  const response = await githubRequest(path)
   if (response.status === 404) throw Object.assign(new Error('Not found'), { status: 404 })
   if (!response.ok) throw new Error(`GitHub request failed with status ${response.status}`)
 
@@ -98,8 +108,7 @@ const githubGet = async (path: string): Promise<unknown> => {
 }
 
 const contentsUrl = (mount: Mount, path: string): string =>
-  `/repos/${mount.repoFullName}/contents/${path ? encodeURI(path) : ''}` +
-  `?ref=${encodeURIComponent(mount.branch)}`
+  githubContentsPath(mount, path) + `?ref=${encodeURIComponent(mount.branch)}`
 
 const listDirectory = async (mount: Mount, path: string): Promise<unknown> => {
   const payload = await githubGet(contentsUrl(mount, path))
@@ -179,6 +188,40 @@ const handle = async (
   }
 
   try {
+    if (route === '/files/write' && request.method === 'POST') {
+      let size = 0
+      const chunks: Buffer[] = []
+      for await (const chunk of request) {
+        size += chunk.length
+        if (size > 6_100_000) {
+          send(response, 413, { detail: 'Cloud text files are limited to 1 MB.' })
+          return
+        }
+        chunks.push(Buffer.from(chunk))
+      }
+      let body: unknown
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      } catch {
+        send(response, 400, { detail: 'Expected a JSON file path and content.' })
+        return
+      }
+      try {
+        send(response, 200, await writer.write(mount, body))
+      } finally {
+        // Also invalidate after an uncertain write; never show stale files as proof.
+        for (const key of cache.keys()) {
+          if (key.startsWith('/repos/' + mount.repoFullName + '/contents/')) cache.delete(key)
+        }
+      }
+      return
+    }
+    if (request.method !== 'GET') {
+      send(response, 405, {
+        detail: 'Unsupported cloud operation. Use write_file to save text files.'
+      })
+      return
+    }
     if (route === '/openapi.json') {
       send(response, 200, githubWorkspaceOpenApi(mount.repoFullName))
       return
@@ -186,9 +229,9 @@ const handle = async (
     if (route === '/info') {
       send(response, 200, {
         info:
-          `Read-only view of the GitHub repository ${mount.repoFullName} on branch ` +
-          `${mount.branch}. There is no checkout and no shell; write changes through ` +
-          `the GitHub tools.`
+          `GitHub repository ${mount.repoFullName} on branch ${mount.branch}. ` +
+          'Use write_file to create or replace files directly on this branch; each write ' +
+          'creates a verified commit. There is no local checkout and no shell.'
       })
       return
     }
@@ -227,8 +270,7 @@ const handle = async (
       return
     }
 
-    // Everything that would change the repository stays with the connector.
-    send(response, 405, { detail: 'This workspace is read-only; use the GitHub tools to write.' })
+    send(response, 404, { detail: 'Unknown workspace operation.' })
   } catch (error) {
     const status = (error as { status?: number }).status ?? 502
     send(response, status, {
@@ -281,6 +323,7 @@ export interface GithubMountResult {
 
 /** Make a repository browsable and return how to register it in Open WebUI. */
 export const mountGithubRepo = async (repo: GithubRepoRef): Promise<GithubMountResult> => {
+  validateGithubScope(repo)
   await ensureServer()
   const slug = githubMountSlug(repo)
   mounts.set(slug, { ...repo, slug })
@@ -303,7 +346,7 @@ export const listGithubMounts = (): GithubMountResult[] =>
 export const unmountGithubRepos = (keep: Set<string>): number => {
   let removed = 0
   for (const [slug, mount] of [...mounts.entries()]) {
-    if (keep.has(githubTerminalId(mount))) continue
+    if (keep.has(githubTerminalId(mount)) || writer.isBusy(mount)) continue
     mounts.delete(slug)
     removed++
   }

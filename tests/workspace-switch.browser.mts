@@ -10,6 +10,7 @@ import test from 'node:test'
 import { patchWorkspaceFileNav } from '../src/main/services/workspace-frontend.ts'
 import { createTerminalStoreBridge } from '../src/renderer/src/lib/guest/terminal-store-bridge.ts'
 import { createWorkspacePreviewTab } from '../src/renderer/src/lib/guest/workspace-preview-tab.ts'
+import { buildWorkspaceChipScript } from '../src/renderer/src/lib/guest/workspace-chip.ts'
 
 const require = createRequire(import.meta.url)
 const { TraceMap, eachMapping } = require('@jridgewell/trace-mapping')
@@ -25,6 +26,9 @@ test(
     let controlsFile = '',
       controlsName = '',
       patchedCode = ''
+    let terminalFile = '',
+      terminalName = '',
+      terminalCode = ''
     for (const filename of await readdir(chunks)) {
       if (!filename.endsWith('.js.map')) continue
       const map = JSON.parse(await readFile(path.join(chunks, filename), 'utf8'))
@@ -36,6 +40,15 @@ test(
         .split('}')[0]
         .split(',')
       const controls = map.sources.findIndex((s: string) => s.endsWith('/ChatControls.svelte'))
+      const terminalSource = map.sources.findIndex((s: string) =>
+        s.endsWith('/MessageInput/TerminalMenu.svelte')
+      )
+      const terminalContextLine =
+        terminalSource < 0
+          ? -1
+          : map.sourcesContent[terminalSource]
+              .split('\n')
+              .findIndex((s: string) => s.includes('const i18n')) + 1
       const contextLine =
         controls < 0
           ? -1
@@ -51,6 +64,22 @@ test(
           generatedColumn: number
           name: string | null
         }) => {
+          if (
+            terminalSource >= 0 &&
+            !terminalName &&
+            mapping.source.endsWith('/MessageInput/TerminalMenu.svelte') &&
+            mapping.originalLine === terminalContextLine
+          ) {
+            const offset =
+              lines
+                .slice(0, mapping.generatedLine - 1)
+                .reduce((n, line) => n + line.length + 1, 0) + mapping.generatedColumn
+            terminalName = [...code.slice(0, offset).matchAll(/function ([\w$]+)\([^)]*\)\{/g)].at(
+              -1
+            )![1]
+            terminalFile = file
+            terminalCode = code + '\nexport {' + terminalName + ' as TestTerminalMenu};'
+          }
           if (
             controls >= 0 &&
             !controlsName &&
@@ -74,7 +103,8 @@ test(
           const name = mapping.name
           if (!name || exports[name]) return
           const isMount =
-            name === 'mount' && mapping.source.endsWith('/svelte/src/internal/client/render.js')
+            ['mount', 'unmount'].includes(name) &&
+            mapping.source.endsWith('/svelte/src/internal/client/render.js')
           const isStore =
             [
               'config',
@@ -97,6 +127,12 @@ test(
       )
     }
     assert.ok(controlsFile && patchedCode && exports.mount && exports.selectedTerminalId)
+    assert.ok(
+      terminalFile && terminalName && exports.unmount,
+      'actual upstream TerminalMenu must be testable'
+    )
+    if (terminalFile === controlsFile)
+      patchedCode += '\nexport {' + terminalName + ' as TestTerminalMenu};'
     const first = path.join(directory, 'first'),
       second = path.join(directory, 'second')
     await mkdir(first)
@@ -126,10 +162,14 @@ test(
       #controls-container{height:85vh;width:520px}#fixture{position:absolute;right:0;top:10vh;bottom:0}
       .flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1}.h-full{height:100%}.min-h-0{min-height:0}.min-w-0{min-width:0}.shrink-0{flex-shrink:0}.items-center{align-items:center}.justify-between{justify-content:space-between}.overflow-y-auto{overflow-y:auto}.w-full{width:100%}svg{width:16px;height:16px}
       #test-controls{padding:30px;width:40%}#result{white-space:pre-wrap}
-    </style><div id="test-controls"><h1>Workspace lifecycle test</h1><button id="first">First folder</button><button id="second">Second folder</button><pre id="result"></pre></div><div id="fixture"></div>
+    </style><div id="test-controls"><h1>Workspace lifecycle test</h1><button id="first">First folder</button><button id="second">Second folder</button><pre id="result"></pre>
+    <div id="composer"><button type="button" id="input-menu-button">+</button><button type="button" id="integration-menu-button">Integrations</button><span id="terminal-fixture"></span></div>
+    <button id="idle-state">Idle</button><button id="generating-state">Generating</button>
+    <section id="integration-fixture"><h2>Integration settings</h2><div id="managed-row"><span>Garmin desktop-garmin-fixture</span><button role="switch" aria-checked="true">On</button></div><div id="user-row"><span>Garmin (my own connector)</span><button role="switch" aria-checked="true">On</button></div><div id="old-terminal-row"><span>open-webui-desktop-terminal:desktop-ws-old</span><button role="switch" aria-checked="true">On</button></div></section></div><div id="fixture"></div>
     <script type="module">
       ${imports}
       import {TestControls} from '/_app/immutable/chunks/${controlsFile}';
+      import {TestTerminalMenu} from '/_app/immutable/chunks/${terminalFile}';
       const delay=ms=>new Promise(r=>setTimeout(r,ms)); const checks=['Viewport '+innerWidth+'px ('+(innerWidth>=1024?'sidebar':'drawer')+')'];
       const waitFor=async(fn,label)=>{for(let i=0;i<100;i++){if(fn())return;await delay(50)}throw new Error(label+'; fixture: '+document.body.innerText.slice(-1200))};
       const i18n={subscribe(fn){fn({t:v=>v});return ()=>{}}};
@@ -173,6 +213,30 @@ test(
         available=false;selection={...selection,chatKey:'no-preview'};tab.update(selection);await delay(100);
         if(document.querySelector('[data-desktop-preview-tab]'))throw new Error('Unavailable preview was not hidden');checks.push('Unavailable preview hidden');
         available=true;await choose('desktop-first');await waitFor(()=>text().includes('first.html'),'Final folder failed');
+        // Test the shipped TerminalMenu's two distinct DOM branches, not a mock.
+        let terminalApp;
+        const terminalState=async(disabled)=>{
+          if(terminalApp)await unmount(terminalApp);
+          terminalApp=mount(TestTerminalMenu,{target:document.getElementById('terminal-fixture'),props:{disabled},context:new Map([['i18n',i18n]])});
+          await delay(100);
+        };
+        await terminalState(false);
+        window.__openWebUIDesktopTerminalBridge={select:async()=>true};
+        window.electronAPI={send:async()=>({ok:true})};
+        await import('/desktop-guest.js');
+        const native=()=>document.querySelector('#terminal-fixture button');
+        await waitFor(()=>native()&&getComputedStyle(native()).display==='none','Idle terminal cloud remains visible');
+        await terminalState(true);
+        await waitFor(()=>native()?.disabled&&getComputedStyle(native()).display==='none','Generating terminal cloud remains visible');
+        checks.push('Actual idle and generating terminal clouds hidden');
+        await waitFor(()=>getComputedStyle(document.getElementById('managed-row')).display==='none'&&getComputedStyle(document.getElementById('old-terminal-row')).display==='none','Managed integration duplicates remain');
+        if(getComputedStyle(document.getElementById('user-row')).display==='none')throw Error('Own Garmin connector was hidden');
+        document.querySelector('#managed-row span').textContent='My custom connector';
+        await waitFor(()=>getComputedStyle(document.getElementById('managed-row')).display!=='none','Reused row remained hidden');
+        document.querySelector('#managed-row span').textContent='Garmin desktop-garmin-fixture';
+        checks.push('Managed integration rows hidden; user connectors preserved');
+        document.getElementById('idle-state').onclick=()=>terminalState(false);
+        document.getElementById('generating-state').onclick=()=>terminalState(true);
         document.getElementById('result').textContent=checks.join('\\n');
         if(!saved){await fetch('/phase',{method:'POST',body:JSON.stringify(checks)});location.search='?saved=1'}
         else await fetch('/result',{method:'POST',body:JSON.stringify({ok:true,checks})});
@@ -189,6 +253,17 @@ test(
         if (url.pathname === '/') {
           response.setHeader('Content-Type', 'text/html')
           response.end(html)
+          return
+        }
+        if (url.pathname === '/desktop-guest.js') {
+          response.setHeader('Content-Type', 'text/javascript')
+          response.end(
+            buildWorkspaceChipScript({
+              alwaysOnToolIds: ['server:desktop-garmin-fixture'],
+              hiddenToolNames: ['Garmin'],
+              german: false
+            })
+          )
           return
         }
         if (url.pathname === '/phase') {
@@ -251,7 +326,9 @@ test(
           response.end(
             url.pathname.endsWith('/' + controlsFile)
               ? patchedCode
-              : await readFile(path.join(frontend!, url.pathname))
+              : url.pathname.endsWith('/' + terminalFile)
+                ? terminalCode
+                : await readFile(path.join(frontend!, url.pathname))
           )
           return
         }

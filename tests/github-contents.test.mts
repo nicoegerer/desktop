@@ -107,14 +107,27 @@ test('a binary file is recognised so it can be refused', () => {
   assert.equal(isBinary(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d])), true)
 })
 
-test('a GitHub workspace publishes the read-only OpenAPI tools Open WebUI loads', () => {
+test('a GitHub workspace publishes scoped read/write OpenAPI tools Open WebUI loads', () => {
   const schema = githubWorkspaceOpenApi('nicoegerer/test1') as {
     info: { title: string }
-    paths: Record<string, { get: { operationId: string } }>
+    paths: Record<
+      string,
+      {
+        get: { operationId: string }
+        post: {
+          operationId: string
+          requestBody: { content: { 'application/json': { schema: { required: string[] } } } }
+        }
+      }
+    >
   }
 
   assert.equal(schema.info.title, 'GitHub workspace: nicoegerer/test1')
   assert.equal(schema.paths['/files/list'].get.operationId, 'list_files')
   assert.equal(schema.paths['/files/read'].get.operationId, 'read_file')
-  assert.ok(!('/files/write' in schema.paths))
+  assert.equal(schema.paths['/files/write'].post.operationId, 'write_file')
+  assert.deepEqual(
+    schema.paths['/files/write'].post.requestBody.content['application/json'].schema.required,
+    ['path', 'content']
+  )
 })

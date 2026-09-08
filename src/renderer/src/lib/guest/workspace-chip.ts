@@ -1,6 +1,7 @@
 import { applyWorkspaceToPayload } from '../../../../shared/services/chat-payload.ts'
 import { createTerminalStoreBridge } from './terminal-store-bridge.ts'
 import { createWorkspacePreviewTab } from './workspace-preview-tab.ts'
+import { resolveWorkspaceKeepIds } from '../../../../shared/services/workspace-lifecycle.ts'
 
 /**
  * Source of the script injected into the embedded Open WebUI page.
@@ -34,6 +35,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var applyWorkspaceToPayload = ${applyWorkspaceToPayload.toString()};
   var createTerminalStoreBridge = ${createTerminalStoreBridge.toString()};
   var createWorkspacePreviewTab = ${createWorkspacePreviewTab.toString()};
+  var resolveWorkspaceKeepIds = ${resolveWorkspaceKeepIds.toString()};
 
   var t = function (de, en) { return opts.german ? de : en; };
 
@@ -99,8 +101,36 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     if (extra && extra.terminalId && ids.indexOf(extra.terminalId) === -1) {
       ids.push(extra.terminalId);
     }
-    ask('workspaceKeepAlive', { ids: ids });
+    var revision = ++workspaceReportRevision;
+    var currentKey = chatKey();
+    // First reserve everything while async task inspection is in progress.
+    ask('workspaceKeepAlive', { ids: ids }).then(function (result) {
+      if (!result || !result.ok || !Array.isArray(result.ids)) return;
+      return resolveWorkspaceKeepIds({
+        selections: all, currentKey: currentKey,
+        extraId: extra && extra.terminalId,
+        registeredIds: result.ids,
+        leasedIds: Object.keys(workspaceRequestLeases).filter(function (id) {
+          return workspaceRequestLeases[id] > Date.now();
+        }),
+        hasRunningChat: async function (key) {
+          var token = localStorage.getItem('token');
+          if (!token) return null;
+          var response = await originalFetch.call(window, '/api/tasks/chat/' + encodeURIComponent(key), {
+            headers: { Authorization: 'Bearer ' + token }
+          });
+          if (!response.ok) return null;
+          var state = await response.json();
+          return Array.isArray(state.task_ids) ? state.task_ids.length > 0 : null;
+        }
+      }).then(function (wanted) {
+        if (revision !== workspaceReportRevision || currentKey !== chatKey()) return;
+        return ask('workspaceKeepAlive', { ids: wanted });
+      });
+    }).catch(function () { /* inspection failure must never interrupt work */ });
   };
+  var workspaceReportRevision = 0;
+  var workspaceRequestLeases = {};
   var saveSelection = function (value, key) {
     var all = readAll();
     key = key || chatKey();
@@ -229,6 +259,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
               pendingSelection = readySelection;
               pendingSourceKey = requestKey;
             }
+            if (readySelection && readySelection.terminalId) {
+              workspaceRequestLeases[readySelection.terminalId] = Date.now() + 60000;
+            }
             reportLiveWorkspaces();
             var patched = applyWorkspaceToPayload(originalBody, {
               selection: readySelection,
@@ -297,14 +330,57 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       'html.desktop-hide-terminal-menu [data-desktop-terminal-menu-wrapper],' +
       'html.desktop-hide-terminal-menu [data-desktop-terminal-menu] {' +
       'display:none !important;}' +
-      '[data-desktop-automatic-tool]{display:none !important;}' +
+      '[data-desktop-automatic-tool],[data-desktop-managed-integration]{display:none !important;}' +
       'html.desktop-hide-tool-count button[aria-label="Available Tools"]{display:none !important;}';
     style.textContent += '[data-desktop-preview]:focus-visible{outline:2px solid currentColor;outline-offset:2px;}';
     (document.head || document.documentElement).appendChild(style);
   };
 
+  var ownedIntegrationLabel = function (row) {
+    // textContent concatenates a connector ID and the adjacent switch label
+    // without a separator. Join text nodes so matching still uses exact IDs.
+    var parts = [];
+    var walker = document.createTreeWalker(row, 4);
+    while (walker.nextNode()) parts.push(walker.currentNode.nodeValue || '');
+    var rowText = parts.join(' ').toLowerCase();
+    return /open-webui-desktop-terminal:desktop-(ws|gh)-/.test(rowText) ||
+      /desktop-workspace-desktop-(ws|gh)-/.test(rowText) ||
+      opts.alwaysOnToolIds.some(function (id) {
+        return id.indexOf('desktop-') !== -1 && rowText.split(/\\s+/).indexOf(id.replace(/^server:(?:mcp:)?/, '').toLowerCase()) !== -1;
+      });
+  };
+
   var tidyOpenWebUIChrome = function () {
     ensureStyle();
+
+    // These system entries are controlled in Desktop Services & Connectors.
+    // Match ownership identifiers, never a user's connector name such as Garmin.
+    var previouslyManaged = document.querySelectorAll('[data-desktop-managed-integration]');
+    for (var pi = 0; pi < previouslyManaged.length; pi++) {
+      if (!ownedIntegrationLabel(previouslyManaged[pi])) {
+        previouslyManaged[pi].removeAttribute('data-desktop-managed-integration');
+      }
+    }
+    var switches = document.querySelectorAll('[role="switch"]');
+    for (var si = 0; si < switches.length; si++) {
+      var integrationRow = switches[si].parentElement;
+      for (var depth = 0; integrationRow && depth < 7; depth++, integrationRow = integrationRow.parentElement) {
+        if (integrationRow.querySelectorAll('[role="switch"]').length !== 1) break;
+        if (!ownedIntegrationLabel(integrationRow)) continue;
+        if (!integrationRow.hasAttribute('data-desktop-managed-integration')) {
+          integrationRow.setAttribute('data-desktop-managed-integration', '1');
+        }
+        var container = integrationRow.parentElement;
+        if (container && !container.querySelector('[data-desktop-integration-note]')) {
+          var managedNote = document.createElement('p');
+          managedNote.setAttribute('data-desktop-integration-note', '1');
+          managedNote.textContent = t('Desktop-Verbindungen werden unter Dienste & Konnektoren verwaltet.', 'Desktop connections are managed in Services & Connectors.');
+          managedNote.style.cssText = 'font-size:12px;opacity:.65;padding:6px 0;';
+          container.insertBefore(managedNote, integrationRow);
+        }
+        break;
+      }
+    }
 
     var counter = document.querySelector('button[aria-label="Available Tools"]');
     var shown = counter ? parseInt((counter.textContent || '').replace(/[^0-9]+/g, ''), 10) : 0;
@@ -604,7 +680,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       var semanticName = typeof content === 'string'
         ? content.replace(/<[^>]*>/g, '').trim()
         : (content && content.textContent ? String(content.textContent).trim() : '');
-      if (semanticName !== 'Terminal' || !terminalMenuTrigger(b)) continue;
+      // During generation upstream uses a disabled button without a Dropdown.
+      // Its Terminal tooltip still identifies the control unambiguously.
+      if (semanticName !== 'Terminal') continue;
       if (found) return null;
       found = b;
     }
@@ -807,6 +885,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         empty.style.cssText = 'padding:10px;font-size:12px;opacity:.5;';
         list.appendChild(empty);
       } else {
+        var cloudNotice = document.createElement('div');
+        cloudNotice.textContent = t('Dateiänderungen werden direkt im ausgewählten GitHub-Branch gespeichert (Commit).', 'File changes are committed directly to the selected GitHub branch.');
+        cloudNotice.style.cssText = 'padding:4px 6px 8px;font-size:11px;opacity:.6;white-space:normal;max-width:270px;';
+        list.appendChild(cloudNotice);
         var search = document.createElement('input');
         search.placeholder = t('Repos durchsuchen …', 'Search repos …');
         search.style.cssText =
@@ -822,8 +904,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
             .slice(0, 60)
             .forEach(function (r) {
               results.appendChild(button(r.fullName, function () {
-                // Mounting the repository read-only gives the file panel
-                // something to show; writing stays with the GitHub tools.
+                // The scoped file toolset reads and commits to the selected branch.
                 changeWorkspace(function () { return ask('workspaceMountRepo', {
                   repoFullName: r.fullName,
                   branch: r.defaultBranch
@@ -1030,6 +1111,9 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     scheduleRender();
     // Release folders left open by conversations that no longer point at them.
     reportLiveWorkspaces();
+    if (typeof window.setInterval === 'function') window.setInterval(function () {
+      if (document.visibilityState !== 'hidden' && !selectionBeingApplied) reportLiveWorkspaces();
+    }, 15000);
 
     window[FLAG] = {
       closePreview: function () { if (previewTab) previewTab.close(); },

@@ -312,6 +312,16 @@ test('closing a workspace removes its terminal from Open WebUI', () => {
   )
 })
 
+test('an id-less local terminal added by the user is not mistaken for legacy desktop clutter', () => {
+  const local = {
+    name: 'My development server',
+    url: 'http://localhost:8000',
+    path: '/openapi.json'
+  }
+  const lookalike = { name: 'Local Open Terminal', url: 'http://localhost.example.com:8000' }
+  assert.deepEqual(mergeTerminalServers([local, lookalike], []), [local, lookalike])
+})
+
 test('a restarted workspace picks up its new port and key', () => {
   const existing = mergeTerminalServers(
     [],

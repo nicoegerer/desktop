@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.32] - 2026-09-08
+
+### Fixed
+
+- Give Cloud workspaces scoped list/read/write tools, prioritized ahead of large connector
+  catalogs. Text files are committed directly to the selected repository and branch, with
+  current-revision conflict protection, serialized writes and immutable commit read-back.
+  Missing write permissions and failed verification are reported, never disguised as success.
+- Hide the duplicate technical terminal cloud during generation as well as while idle.
+  The selected Cloud workspace keeps its own identifying icon on the right.
+- Hide desktop-managed duplicates in Open WebUI's integration settings; manage these in
+  Services & Connectors. Keep user-added connectors, including their own local endpoints.
+- Release unused workspace registrations without forgetting chat selections. Protect active
+  background answers, recent requests, running commands, live PTYs and configured services.
+  Rapidly reopening a workspace waits for any in-progress shutdown.
+
+### Tests
+
+- Exercise the real cloud HTTP server against a simulated GitHub transport: authenticated
+  create/read/list, scope boundaries, commit verification and cache invalidation.
+- Extend the shipped-component browser release gate with both TerminalMenu states and
+  integration-row ownership checks. No production GitHub test commits are required.
+
 ## [0.0.20-services.31] - 2026-09-08
 
 ### Fixed

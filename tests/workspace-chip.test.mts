@@ -113,6 +113,7 @@ interface Harness {
   nativeClicks: () => { terminal: number; tools: number; integrations: number; globe: number }
   changeWorkspace: (load: () => Promise<unknown>) => Promise<boolean>
   toolsCounterHidden: () => boolean
+  terminalHidden: () => boolean
 }
 
 const run = (
@@ -123,6 +124,7 @@ const run = (
     select?: (id: string | null, current: () => boolean) => Promise<boolean>
     fetch?: (url: unknown, init: unknown) => Promise<unknown>
     counterCount?: number
+    terminalDisabled?: boolean
   } = {}
 ): Harness => {
   const calls: Array<{ url: string; body: unknown }> = []
@@ -221,8 +223,13 @@ const run = (
   tools.setAttribute('aria-label', 'Available Tools')
   tools.textContent = String(options.counterCount ?? 0)
   globe.setAttribute('aria-label', 'Web Search')
-  terminalTrigger.setAttribute('role', 'button')
-  terminalTrigger.setAttribute('aria-haspopup', 'true')
+  if (!options.terminalDisabled) {
+    terminalTrigger.setAttribute('role', 'button')
+    terminalTrigger.setAttribute('aria-haspopup', 'true')
+  } else {
+    terminal.setAttribute('disabled', '')
+    terminal.setAttribute('aria-disabled', 'true')
+  }
   terminal.parentElement = terminalTooltip
   terminalTooltip.parentElement = terminalTrigger
   terminalTooltip._tippy = { props: { content: 'Terminal' } }
@@ -360,6 +367,7 @@ const run = (
     bridge,
     changeWorkspace: (load) => changeWorkspace(load),
     toolsCounterHidden: () => toolsCounterHidden,
+    terminalHidden: () => terminal.getAttribute('data-desktop-terminal-menu') === '1',
     storage: () => store,
     navigate: (path: string) => {
       ;(
@@ -451,6 +459,20 @@ test('a workspace change cannot open the available-tools dialog', async () => {
   await h.settle()
 
   assert.equal(h.nativeClicks().tools, 0)
+})
+
+test('the technical terminal cloud is hidden both idle and while generation disables its dropdown', async () => {
+  for (const terminalDisabled of [false, true]) {
+    const h = run(
+      { 'chat-123': { mode: 'local', terminalId: 'desktop-ws-test', label: 'test' } },
+      '/c/chat-123',
+      undefined,
+      { terminalDisabled }
+    )
+    await h.settle()
+    assert.equal(h.terminalHidden(), true)
+    assert.deepEqual(h.nativeClicks(), { terminal: 0, tools: 0, integrations: 0, globe: 0 })
+  }
 })
 
 test('a saved local workspace is restored before the chat request is sent', async () => {
