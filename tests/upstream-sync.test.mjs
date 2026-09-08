@@ -164,4 +164,11 @@ test('release requires completed successful packaging and the Windows HTTP gate'
   assert.match(httpGate, /if: runner\.os == 'Windows' && matrix\.arch == 'x64'/)
   assert.match(httpGate, /python -B tests\/test_workspace_write_guard\.py --real --real-http -v/)
   assert.doesNotMatch(httpGate, /continue-on-error:\s*true/)
+  const workspaceGate = packageJob.match(
+    /- name: Test shipped workspace switching and conditional preview tabs([\s\S]*?)(?=\n {12}- name:)/
+  )?.[1]
+  assert.ok(workspaceGate)
+  assert.match(workspaceGate, /--frontend-output \$env:OPEN_WEBUI_FRONTEND/)
+  assert.match(workspaceGate, /--test tests\/workspace-switch\.browser\.mts/)
+  assert.doesNotMatch(workspaceGate, /continue-on-error:\s*true/)
 })

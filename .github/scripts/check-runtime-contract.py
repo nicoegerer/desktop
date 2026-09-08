@@ -4,6 +4,7 @@ Executes its ordered OpenAPI resolver with synthetic servers, no credentials or
 user data. This is a compatibility gate, not a substitute for the live model test.
 """
 import ast
+import argparse
 import asyncio
 import hashlib
 import io
@@ -17,6 +18,9 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSIONS = json.loads((ROOT / 'src/shared/runtime-versions.json').read_text())
+parser = argparse.ArgumentParser()
+parser.add_argument('--frontend-output', type=Path)
+args = parser.parse_args()
 subprocess.run([sys.executable, '-B', str(ROOT / 'tests/test_workspace_write_guard.py')], check=True)
 
 
@@ -84,6 +88,9 @@ for name in webui.namelist():
     if not name.endswith('.js.map') or '/_app/immutable/' not in name:
         continue
     source_map = json.loads(webui.read(name))
+    if any(source.endswith('/components/chat/FileNav.svelte') for source in source_map.get('sources', [])):
+        subprocess.run(['node', '--experimental-strip-types', str(ROOT / '.github/scripts/check-workspace-frontend.mts')],
+                       input=json.dumps({'code': webui.read(name[:-4]).decode(), 'map': source_map}), text=True, check=True)
     for source, content in zip(source_map.get('sources', []), source_map.get('sourcesContent', [])):
         for target in wanted:
             if source.endswith(target):
@@ -101,6 +108,18 @@ assert 'showFileNavPath.subscribe' in file_nav and 'getCwd(' in file_nav
 cwd_api = frontend_sources[wanted[3]]
 assert '/files/cwd' in cwd_api and "headers['X-Session-Id'] = sessionId" in cwd_api
 print('Published frontend: terminal remount, file-navigation stores and per-chat cwd contract verified')
+if args.frontend_output:
+    # Only compiled frontend assets into an explicitly selected CI/test directory.
+    prefix = 'open_webui/frontend/'
+    for name in webui.namelist():
+        if not name.startswith(prefix + '_app/immutable/') or name.endswith('/'):
+            continue
+        relative = Path(name[len(prefix):])
+        if '..' in relative.parts or relative.is_absolute():
+            raise RuntimeError('Unsafe wheel entry')
+        target = args.frontend_output / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(webui.read(name))
 middleware = webui.read('open_webui/utils/middleware.py').decode()
 assert "form_data.pop('terminal_id'" in middleware or 'form_data.pop("terminal_id"' in middleware
 assert 'get_terminal_tools(' in middleware and 'get_tools(' in middleware

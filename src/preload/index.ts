@@ -203,6 +203,10 @@ const api = {
   syncOpenWebUI: () => ipcRenderer.invoke('open-webui:sync'),
 
   // Address a registered workspace, never an arbitrary renderer-supplied disk path.
+  workspacePreviewInspect: (request: {
+    terminalId: string
+  }): Promise<{ available: boolean; entryPath?: string }> =>
+    ipcRenderer.invoke('workspace:preview:inspect', { terminalId: request?.terminalId }),
   workspacePreviewOpen: (request: {
     terminalId: string
     entryPath?: string

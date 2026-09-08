@@ -28,6 +28,28 @@ export type WorkspacePreviewResult =
 /** Keep the embedding iframe sandboxed even if a page navigates away from its initial URL. */
 export const WORKSPACE_PREVIEW_SANDBOX = 'allow-scripts'
 
+export interface WorkspacePreviewBounds {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** Guest coordinates are fractions of its viewport; an overlay cannot escape the webview. */
+export function validWorkspacePreviewBounds(value: unknown): value is WorkspacePreviewBounds {
+  if (!value || typeof value !== 'object') return false
+  const bounds = value as WorkspacePreviewBounds
+  return (
+    [bounds.left, bounds.top, bounds.width, bounds.height].every(Number.isFinite) &&
+    bounds.left >= 0 &&
+    bounds.top >= 0 &&
+    bounds.width > 0 &&
+    bounds.height > 0 &&
+    bounds.left + bounds.width <= 1.001 &&
+    bounds.top + bounds.height <= 1.001
+  )
+}
+
 /** Used for every subframe navigation in the trusted desktop renderer, not guest webviews. */
 export const isWorkspacePreviewNavigationAllowed = (
   targetUrl: string,

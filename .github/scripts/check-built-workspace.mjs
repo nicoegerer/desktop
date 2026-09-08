@@ -56,6 +56,15 @@ assert.equal(
 assert.equal(stores.selectedTerminalId.value, 'new')
 assert.equal(stores.showFileNavPath.value, null)
 assert.equal(stores.showFileNavDir.value, null)
+const previewStart = bundle.indexOf('function createWorkspacePreviewTab(')
+assert.ok(previewStart >= 0, 'Conditional sidebar preview tab must be shipped')
+const previewEnd = bundle.indexOf('\n}\n', previewStart) + 2
+assert.ok(previewEnd > previewStart)
+const previewFactory = bundle.slice(previewStart, previewEnd)
+assert.doesNotThrow(() => new Function(`return (${previewFactory})`))
+assert.ok(previewFactory.includes('workspacePreviewInspect'))
+assert.ok(previewFactory.includes('workspacePreviewShow'))
+assert.ok(previewFactory.includes('panel.files.after(button)'))
 console.log(
   'Shipped renderer verified: self-contained rewriter and store bridge, selected filesystem first, stale preview cleared'
 )

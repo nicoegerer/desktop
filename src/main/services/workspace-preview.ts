@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, open, realpath, stat } from 'node:fs/promises'
+import { lstat, open, opendir, realpath, stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 
@@ -176,6 +176,40 @@ export class WorkspacePreviewManager {
 
   getActive(): WorkspacePreviewInfo | null {
     return this.current ? { ...this.current.info } : null
+  }
+
+  /** Read-only availability probe. Does not start a server or retire an open preview. */
+  async inspect(workspacePath: string): Promise<{ available: boolean; entryPath?: string }> {
+    try {
+      if (!path.isAbsolute(workspacePath)) return { available: false }
+      const root = await realpath(workspacePath)
+      if (path.parse(root).root === root || !(await stat(root)).isDirectory())
+        return { available: false }
+      const candidates = new Set(['index.html', 'index.htm'])
+      let count = 0
+      for await (const entry of await opendir(root)) {
+        if (entry.isFile() && /\.html?$/i.test(entry.name)) candidates.add(entry.name)
+        if (++count >= 512) break
+      }
+      for (const candidate of [...candidates].sort(
+        (a, b) =>
+          (a === 'index.html' ? -2 : a === 'index.htm' ? -1 : 0) -
+            (b === 'index.html' ? -2 : b === 'index.htm' ? -1 : 0) || a.localeCompare(b)
+      )) {
+        try {
+          const resolved = await resolveFile(root, candidate)
+          const metadata = await stat(resolved.filename)
+          if (metadata.isFile() && metadata.size <= MAX_FILE_BYTES) {
+            return { available: true, entryPath: resolved.relativePath }
+          }
+        } catch {
+          /* Try the next safe local HTML entry. */
+        }
+      }
+    } catch {
+      /* Missing, inaccessible and cloud workspaces have no preview. */
+    }
+    return { available: false }
   }
 
   async open(request: WorkspacePreviewRequest): Promise<WorkspacePreviewInfo> {

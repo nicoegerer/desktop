@@ -2,9 +2,22 @@
   import { onMount } from 'svelte'
   import type { WorkspacePreviewInfo } from '../../../../../../shared/workspace-preview'
   import { WORKSPACE_PREVIEW_SANDBOX } from '../../../../../../shared/workspace-preview'
-  let { terminalId, label, onClose }: { terminalId: string; label: string; onClose: () => void } =
-    $props()
-  let entry = $state('index.html')
+  let {
+    terminalId,
+    label,
+    onClose,
+    initialEntry = 'index.html',
+    embedded = false
+  }: {
+    terminalId: string
+    label: string
+    onClose: () => void
+    initialEntry?: string
+    embedded?: boolean
+  } = $props()
+  // Initial entry is captured for this keyed workspace, then editable by the user.
+  // svelte-ignore state_referenced_locally
+  let entry = $state(initialEntry)
   let preview = $state<WorkspacePreviewInfo | null>(null)
   let busy = $state(false)
   let error = $state('')
@@ -65,11 +78,12 @@
 
 <aside
   aria-label="Website-Vorschau"
+  class:embedded
   class="preview-panel bg-[#f5f5f7] dark:bg-[#151515] border-l border-black/10 dark:border-white/10"
 >
   <header class="flex items-center gap-2 px-4 py-3 border-b border-black/10 dark:border-white/10">
     <div class="min-w-0 flex-1">
-      <h2 class="text-[13px] font-medium">Vorschau</h2>
+      {#if !embedded}<h2 class="text-[13px] font-medium">Vorschau</h2>{/if}
       <p class="text-[12px] opacity-60 truncate" title={label}>{label}</p>
     </div>
     <button
@@ -145,6 +159,12 @@
     padding: 5px 9px;
     font-size: 12px;
     cursor: pointer;
+  }
+  .preview-panel.embedded {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    border-left: 0;
   }
   .preview-action:hover {
     background: #8882;

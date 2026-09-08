@@ -2,9 +2,13 @@
 
 ## Preview a generated website
 
-Select the local workspace in the chat composer, then choose **Vorschau / Preview** next to it. The website appears beside the chat. The default entry is `index.html`; the HTML field also accepts a workspace-relative file such as `pages/dashboard.html`. **Neu laden** reloads the files after an edit; **Breit / Mobil** changes the viewport width.
+Select the local workspace in the chat composer, then choose **Vorschau / Preview** beside **Steuerung / Controls** and **Dateien / Files** in the right sidebar. This tab is shown only when a safe local HTML entry exists in that workspace. `index.html` is preferred, followed by `index.htm` or another root-level HTML file. Availability refreshes after files are created or removed. The HTML field also accepts a workspace-relative file such as `pages/dashboard.html`. **Neu laden** reloads the files after an edit; **Breit / Mobil** changes the viewport width.
 
-Changing the workspace or conversation closes the old preview. No new chat is required to change workspaces. Cloud repository mounts are not local websites and cannot use this preview. Opening the preview hides Open WebUI's file/controls pane to leave room; it does not change the selected workspace.
+Changing the workspace or conversation closes the old preview. No new chat is required to change workspaces. Cloud repository mounts are not local websites and have no preview tab. The preview occupies the existing sidebar body; its native Controls/Files tabs remain accessible. It does not change the selected workspace.
+
+Local workspace selection uses the exact directory chosen by the user. No checkout, copy, virtual alias or `OpenWebUI Workspaces` directory is created. Previously selected directories remain in Recently used, with their full original paths shown to distinguish identically named projects.
+
+The desktop applies a source-map-verified, column-preserving compatibility fix to the shipped Open WebUI FileNav initialization. Every mount reads the current terminal/session cwd instead of reusing a module-level path from a different draft workspace. The upstream asset is backed up beside the original as `.desktop-original`; upgrades validate the new runtime contract and reapply the fix. Only the local connection's HTTP asset cache is cleared, not cookies or chats.
 
 The preview serves local HTML, CSS, JavaScript, images, fonts and media. It is not a development server: server-side apps, external APIs/CDNs, forms, workers and embedded external pages are deliberately blocked. Use local assets for an offline static website. The preview never receives terminal credentials or the Electron API.
 
@@ -36,6 +40,16 @@ Official references (checked 2026-09-07):
 ## Regression coverage
 
 `npm run test:ipc` includes workspace/chip/store regressions, preview HTTP/path/lifecycle tests, IPC authorization tests and catalog/editor-preservation tests. The isolated Electron browser regression additionally checks real CSS/modules/fonts, opaque-origin restrictions, blocked navigation and workspace replacement. The UI smoke harness uses synthetic connections and an isolated profile, never the user's live service configuration.
+
+### Verification on 2026-09-08
+
+- 160 regression tests passed. Typecheck, Svelte check, Vite build and shipped-script checks passed.
+- The original published ChatControls and FileNav run in an isolated Electron test with real fixture folders, in both a draft and a saved chat. Both directions of folder switching, placement beside Files, returning from Preview to Files and hiding unavailable previews passed.
+- The same test without the compatibility patch reproduces the old-directory defect.
+- The separate real Chromium sandbox/assets regression passed. New modules and targeted tests pass lint; unrelated legacy lint errors remain.
+- Computer Use also selected the second fixture folder and verified that `second.html` replaced `first.html`.
+
+Repeat the actual-upstream test with `OPEN_WEBUI_FRONTEND` pointing to the installed package's `frontend` directory and `node --experimental-strip-types --test tests/workspace-switch.browser.mts`. No installed package or personal workspaces are modified by that test. The release workflow obtains the pinned published frontend automatically.
 
 ### Verification on 2026-09-07
 

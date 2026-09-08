@@ -8,6 +8,7 @@ type PreviewFailure = Extract<WorkspacePreviewResult, { ok: false }>
 type PreviewTerminal = { id: string; cwd: string }
 
 interface PreviewManager {
+  inspect(workspacePath: string): Promise<{ available: boolean; entryPath?: string }>
   open(request: WorkspacePreviewRequest): Promise<WorkspacePreviewInfo>
   close(id: string): Promise<void>
   closeAll(): Promise<void>
@@ -22,6 +23,7 @@ interface PreviewIpcOptions {
 }
 
 export interface WorkspacePreviewHandlers {
+  inspect(event: unknown, request: unknown): Promise<{ available: boolean; entryPath?: string }>
   open(event: unknown, request: unknown): Promise<WorkspacePreviewResult>
   close(event: unknown, request: unknown): Promise<{ ok: true } | PreviewFailure>
   getActive(event: unknown): { ok: true; preview: WorkspacePreviewInfo | null } | PreviewFailure
@@ -50,6 +52,17 @@ export const createWorkspacePreviewHandlers = (
   }
 
   return {
+    inspect: async (event, request) => {
+      if (!options.isTrustedSender(event) || !isRecord(request)) return { available: false }
+      const terminal = options.listTerminals().find((entry) => entry.id === request.terminalId)
+      if (!terminal) return { available: false }
+      const result = await options.manager.inspect(terminal.cwd)
+      return options
+        .listTerminals()
+        .some((entry) => entry.id === terminal.id && entry.cwd === terminal.cwd)
+        ? result
+        : { available: false }
+    },
     open: async (event: unknown, request: unknown): Promise<WorkspacePreviewResult> => {
       if (!options.isTrustedSender(event) || !isRecord(request)) return invalidWorkspace()
       const requestedId = request.terminalId

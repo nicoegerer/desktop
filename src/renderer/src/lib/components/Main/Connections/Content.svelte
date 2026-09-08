@@ -10,6 +10,10 @@
   import { buildWorkspaceChipScript } from '../../../guest/workspace-chip'
   import { connectorToolId } from '../../../../../../shared/services/tool-servers'
   import WorkspacePreview from './WorkspacePreview.svelte'
+  import {
+    validWorkspacePreviewBounds,
+    type WorkspacePreviewBounds
+  } from '../../../../../../shared/workspace-preview'
 
   interface Props {
     sidebarOpen: boolean
@@ -81,9 +85,23 @@
 
   // Content preload path for webview bridge
   let contentPreloadPath: string = $state('')
-  let previewSelection = $state<{ terminalId: string; label: string; chatKey: string } | null>(null)
+  let previewSelection = $state<{
+    terminalId: string
+    label: string
+    chatKey: string
+    entryPath: string
+    bounds: WorkspacePreviewBounds
+  } | null>(null)
   let workspaceState = { terminalId: '', label: '', chatKey: '', mode: '', pending: false }
   let integrationError = $state('')
+
+  const closePreview = (): void => {
+    previewSelection = null
+    const wv = document.querySelector(
+      'webview[partition="persist:connection-local"]'
+    ) as Electron.WebviewTag | null
+    void wv?.executeJavaScript('window.__desktopWorkspaceChip?.closePreview?.()').catch(() => {})
+  }
 
   onMount(() => {
     const openIntegrations = async () => {
@@ -292,15 +310,22 @@
                   !workspaceState.pending &&
                   workspaceState.mode === 'local' &&
                   requestData.terminalId === workspaceState.terminalId &&
-                  requestData.chatKey === workspaceState.chatKey
+                  requestData.chatKey === workspaceState.chatKey &&
+                  typeof requestData.entryPath === 'string' &&
+                  validWorkspacePreviewBounds(requestData.bounds)
                 ) {
                   previewSelection = {
                     terminalId: workspaceState.terminalId,
                     chatKey: workspaceState.chatKey,
-                    label: workspaceState.label
+                    label: workspaceState.label,
+                    entryPath: requestData.entryPath,
+                    bounds: requestData.bounds
                   }
                 }
                 response = { ok: !!previewSelection }
+              } else if (requestData.type === 'workspacePreviewHide' && connId === 'local') {
+                previewSelection = null
+                response = { ok: true }
               } else {
                 response = await window.electronAPI[requestData.type]?.(requestData)
               }
@@ -368,7 +393,7 @@
 >
   <!-- Webviews — all open connections stay alive, only active one visible -->
   <div
-    class="flex flex-1 min-h-0 min-w-0 {previewSelection ? 'has-preview' : ''}"
+    class="relative flex flex-1 min-h-0 min-w-0"
     style:display={view === 'connected' ? 'flex' : 'none'}
   >
     {#each [...openConnections] as [connId, connUrl] (connId)}
@@ -382,13 +407,23 @@
       ></webview>
     {/each}
     {#if previewSelection}
-      {#key previewSelection.chatKey + ':' + previewSelection.terminalId}
-        <WorkspacePreview
-          terminalId={previewSelection.terminalId}
-          label={previewSelection.label}
-          onClose={() => (previewSelection = null)}
-        />
-      {/key}
+      <div
+        class="absolute z-10 min-w-0 min-h-0 overflow-hidden"
+        style:left={`${previewSelection.bounds.left * 100}%`}
+        style:top={`${previewSelection.bounds.top * 100}%`}
+        style:width={`${previewSelection.bounds.width * 100}%`}
+        style:height={`${previewSelection.bounds.height * 100}%`}
+      >
+        {#key previewSelection.chatKey + ':' + previewSelection.terminalId}
+          <WorkspacePreview
+            terminalId={previewSelection.terminalId}
+            label={previewSelection.label}
+            initialEntry={previewSelection.entryPath}
+            embedded={true}
+            onClose={closePreview}
+          />
+        {/key}
+      </div>
     {/if}
   </div>
   {#if integrationError}
@@ -736,11 +771,3 @@
     />
   {/if}
 </div>
-
-<style>
-  @media (max-width: 800px) {
-    .has-preview :global(webview) {
-      display: none !important;
-    }
-  }
-</style>

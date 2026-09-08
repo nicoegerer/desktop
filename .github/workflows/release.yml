@@ -103,6 +103,17 @@ jobs:
               shell: pwsh
               run: node --experimental-strip-types --test tests/workspace-preview.browser.mts
 
+            - name: Test shipped workspace switching and conditional preview tabs
+              if: runner.os == 'Windows' && matrix.arch == 'x64'
+              timeout-minutes: 15
+              shell: pwsh
+              run: |
+                  $env:OPEN_WEBUI_FRONTEND = Join-Path $env:RUNNER_TEMP 'workspace-frontend'
+                  python .github/scripts/check-runtime-contract.py --frontend-output $env:OPEN_WEBUI_FRONTEND
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  node --experimental-strip-types --test tests/workspace-switch.browser.mts
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
             - name: Download Compiled Output
               uses: actions/download-artifact@v4
               with:

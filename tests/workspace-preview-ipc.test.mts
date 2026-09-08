@@ -36,6 +36,7 @@ const fixture = (): Fixture => {
   }
   const handlers = createWorkspacePreviewHandlers({
     manager: {
+      inspect: async () => ({ available: true, entryPath: 'index.html' }),
       open: async (request) => {
         opens.push(request)
         return openImpl(request)
@@ -79,6 +80,23 @@ test('preview IPC takes cwd only from a registered terminal, not the renderer pa
   })
   assert.equal(result.ok, true)
   assert.deepEqual(f.opens, [{ workspacePath: '/projects/first', entryPath: 'pages/site.html' }])
+})
+
+test('availability uses registered local workspaces and never opens a server', async () => {
+  const f = fixture()
+  assert.deepEqual(await f.handlers.inspect({}, { terminalId: 'desktop-first' }), {
+    available: false
+  })
+  assert.deepEqual(await f.handlers.inspect(f.trusted, { terminalId: 'cloud-repo' }), {
+    available: false
+  })
+  assert.deepEqual(await f.handlers.inspect(f.trusted, null), { available: false })
+  assert.deepEqual(
+    await f.handlers.inspect(f.trusted, { terminalId: 'desktop-first', workspacePath: '/private' }),
+    { available: true, entryPath: 'index.html' }
+  )
+  assert.deepEqual(f.opens, [])
+  assert.equal(f.handlers.getActive(f.trusted).ok, true)
 })
 
 test('unknown, cloud, malformed and untrusted preview requests never reach the filesystem manager', async () => {

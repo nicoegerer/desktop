@@ -12,8 +12,25 @@ import {
 import {
   WORKSPACE_PREVIEW_SANDBOX,
   isWorkspacePreviewNavigationAllowed,
-  getWorkspacePreviewRequestHeaders
+  getWorkspacePreviewRequestHeaders,
+  validWorkspacePreviewBounds
 } from '../src/shared/workspace-preview.ts'
+
+test('preview overlay is confined to the webview viewport', () => {
+  assert.equal(
+    validWorkspacePreviewBounds({ left: 0.7, top: 0.05, width: 0.3, height: 0.95 }),
+    true
+  )
+  for (const bounds of [
+    null,
+    {},
+    { left: -1, top: 0, width: 1, height: 1 },
+    { left: 0.8, top: 0, width: 0.4, height: 1 },
+    { left: 0, top: NaN, width: 1, height: 1 },
+    { left: 0, top: 0, width: 0, height: 1 }
+  ])
+    assert.equal(validWorkspacePreviewBounds(bounds), false)
+})
 
 test('preview navigation allows only the current loopback origin and fails closed', () => {
   const active = 'http://127.0.0.1:43210/index.html?__desktop_preview=test'
@@ -76,6 +93,25 @@ test('trusted preview headers never leak capabilities to external or retired ori
 })
 
 type Fixture = { directory: string; root: string; second: string; manager: WorkspacePreviewManager }
+
+test('availability appears only for real local HTML and never replaces an active preview', async () => {
+  const f = await fixture()
+  try {
+    const preview = await f.manager.open({ workspacePath: f.root })
+    assert.deepEqual(await f.manager.inspect(f.root), { available: true, entryPath: 'index.html' })
+    assert.deepEqual(await f.manager.inspect(path.join(f.root, 'assets')), { available: false })
+    await writeFile(path.join(f.root, 'assets', 'custom.htm'), '<h1>Custom</h1>')
+    assert.deepEqual(await f.manager.inspect(path.join(f.root, 'assets')), {
+      available: true,
+      entryPath: 'custom.htm'
+    })
+    assert.deepEqual(await f.manager.inspect(path.join(f.root, 'missing')), { available: false })
+    assert.equal(f.manager.getActive()?.id, preview.id)
+  } finally {
+    await f.manager.closeAll()
+    await rm(f.directory, { recursive: true, force: true })
+  }
+})
 
 const fixture = async (): Promise<Fixture> => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'desktop-workspace-preview-test-'))

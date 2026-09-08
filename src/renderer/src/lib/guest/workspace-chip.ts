@@ -1,5 +1,6 @@
 import { applyWorkspaceToPayload } from '../../../../shared/services/chat-payload.ts'
 import { createTerminalStoreBridge } from './terminal-store-bridge.ts'
+import { createWorkspacePreviewTab } from './workspace-preview-tab.ts'
 
 /**
  * Source of the script injected into the embedded Open WebUI page.
@@ -32,6 +33,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var opts = ${JSON.stringify(options)};
   var applyWorkspaceToPayload = ${applyWorkspaceToPayload.toString()};
   var createTerminalStoreBridge = ${createTerminalStoreBridge.toString()};
+  var createWorkspacePreviewTab = ${createWorkspacePreviewTab.toString()};
 
   var t = function (de, en) { return opts.german ? de : en; };
 
@@ -333,13 +335,14 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   var chip = null;
   var chipIcon = null;
   var chipLabel = null;
-  var previewButton = null;
+  var previewTab = null;
   var previewContext = '';
   var reportPreviewState = function (pending) {
     var s = selection();
     var data = { chatKey: chatKey(), terminalId: s && s.terminalId || '',
       mode: s && s.mode || '', label: s && s.label || '', pending: !!pending };
     var key = JSON.stringify(data);
+    if (previewTab) previewTab.update(data);
     if (key === previewContext) return;
     previewContext = key;
     ask('workspacePreviewState', data);
@@ -784,8 +787,17 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
         list.appendChild(heading(t('Zuletzt verwendet', 'Recently used')));
         recent.forEach(function (entry) {
           var s = selection();
-          list.appendChild(button(entry.name, function () { openLocal(entry.path, entry.name); },
-            !!s && s.mode === 'local' && s.label === entry.name));
+          var localButton = button(entry.name, function () { openLocal(entry.path, entry.name); },
+            !!s && s.mode === 'local' && s.path === entry.path);
+          localButton.title = entry.path;
+          localButton.style.flexDirection = 'column';
+          localButton.style.alignItems = 'flex-start';
+          localButton.style.gap = '2px';
+          var pathLabel = document.createElement('span');
+          pathLabel.textContent = entry.path;
+          pathLabel.style.cssText = 'font-size:10px;opacity:.55;max-width:100%;overflow:hidden;text-overflow:ellipsis;';
+          localButton.appendChild(pathLabel);
+          list.appendChild(localButton);
         });
       }
     } else {
@@ -936,36 +948,10 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
       chip.appendChild(chipLabel);
       row.appendChild(chip);
     }
-    if (!previewButton || !previewButton.isConnected) {
-      previewButton = document.createElement('button');
-      previewButton.type = 'button';
-      previewButton.setAttribute('data-desktop-preview', '1');
-      previewButton.style.cssText = CHIP_STYLE;
-      previewButton.onclick = function (event) {
-        event.preventDefault(); event.stopPropagation();
-        var s = selection();
-        if (busy || !s || s.mode !== 'local') return;
-        var context = chatKey() + ':' + s.terminalId;
-        discoverStoreBridge().then(function (bridge) {
-          var current = selection();
-          if (busy || !current || context !== chatKey() + ':' + current.terminalId) return;
-          if (bridge && bridge.hideFiles) bridge.hideFiles();
-          ask('workspacePreviewShow', { terminalId: current.terminalId, chatKey: chatKey() });
-        });
-      };
-      row.appendChild(previewButton);
-    }
     markTerminalMenu();
     setMenuHidden(true);
 
     var s = selection();
-    var previewText = t('Vorschau', 'Preview');
-    if (previewButton.textContent !== previewText) previewButton.textContent = previewText;
-    previewButton.disabled = busy || !s || s.mode !== 'local';
-    previewButton.style.opacity = previewButton.disabled ? '0.4' : '0.85';
-    previewButton.title = s && s.mode === 'cloud'
-      ? t('Vorschau benötigt einen lokalen Arbeitsbereich', 'Preview requires a local workspace')
-      : t('Website aus dem ausgewählten Arbeitsbereich anzeigen', 'Preview the selected workspace website');
     reconcileSelection(s);
     var icon = s && s.mode === 'cloud' ? ICON_CLOUD : s ? ICON_FOLDER : ICON_EMPTY;
     if (chipIcon.innerHTML !== icon) chipIcon.innerHTML = icon;
@@ -974,6 +960,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     var title = s
       ? t('Arbeitsbereich dieses Chats ändern', 'Change this conversation’s workspace')
       : t('Arbeitsbereich für diesen Chat wählen', 'Choose a workspace for this conversation');
+    if (s && s.path) title += '\\n' + s.path;
     if (chip.title !== title) chip.title = title;
     var opacity = s ? '0.85' : '0.5';
     if (chip.style.opacity !== opacity) chip.style.opacity = opacity;
@@ -1027,6 +1014,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
   // while wiring up, the page must be left exactly as Open WebUI built it — a
   // broken chip is a nuisance, a broken chat is not usable at all.
   try {
+    previewTab = createWorkspacePreviewTab(ask, t, scheduleRender);
     document.addEventListener('click', function () { closePanel(); });
     window.addEventListener('popstate', function () {
       reportPreviewState(true);
@@ -1044,6 +1032,7 @@ export const buildWorkspaceChipScript = (options: GuestScriptOptions): string =>
     reportLiveWorkspaces();
 
     window[FLAG] = {
+      closePreview: function () { if (previewTab) previewTab.close(); },
       openIntegrations: function () { return discoverStoreBridge().then(function (bridge) {
         return !!(bridge && bridge.openIntegrations && bridge.openIntegrations());
       }); },

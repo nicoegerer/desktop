@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.31] - 2026-09-08
+
+### Fixed
+
+- Always initialize Files from the selected terminal/session directory, including empty chats.
+  The upstream FileNav module's previously saved path cannot override a new workspace.
+- Preserve the exact selected local path and display full paths in Recently used, including
+  identically named projects. No workspace copy or virtual directory is created.
+- Move Preview into the existing right sidebar beside Controls and Files. Show the tab only
+  when a safe local HTML entry is available; folder/chat changes retire the old preview.
+- Gate runtime updates on the source-map-verified FileNav compatibility patch. The Windows
+  release gate exercises the actual shipped ChatControls/FileNav and conditional preview tabs.
+
 ## [0.0.20-services.30] - 2026-09-07
 
 ### Added

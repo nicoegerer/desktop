@@ -137,9 +137,9 @@ const workspacePreview = createWorkspacePreviewHandlers({
   isTrustedSender: (event) =>
     Boolean(
       mainWindow &&
-        !mainWindow.isDestroyed() &&
-        event?.sender === mainWindow.webContents &&
-        event.senderFrame === mainWindow.webContents.mainFrame
+      !mainWindow.isDestroyed() &&
+      event?.sender === mainWindow.webContents &&
+      event.senderFrame === mainWindow.webContents.mainFrame
     ),
   describeError: (cause) =>
     cause instanceof WorkspacePreviewError
@@ -727,7 +727,8 @@ function createMainWindow(show = true): void {
     if (
       !event.isMainFrame &&
       !isWorkspacePreviewNavigationAllowed(event.url, workspacePreviewManager.getActive()?.url)
-    ) event.preventDefault()
+    )
+      event.preventDefault()
   })
 
   if (CONFIG?.windowMaximized) {
@@ -749,7 +750,8 @@ function createMainWindow(show = true): void {
     if (
       activePreview &&
       isWorkspacePreviewNavigationAllowed(details.referrer?.url, activePreview.url)
-    ) return { action: 'deny' }
+    )
+      return { action: 'deny' }
     openUrl(details.url)
     return { action: 'deny' }
   })
@@ -1013,7 +1015,9 @@ const startServerHandler = async (): Promise<boolean> => {
 
     // Each desktop release carries an explicit, compatibility-tested backend.
     const runtimeUpgrade = runtimeUpgradeVersion(
-      getPackageVersion('open-webui'), runtimeVersions.openWebUI, CONFIG?.localServer
+      getPackageVersion('open-webui'),
+      runtimeVersions.openWebUI,
+      CONFIG?.localServer
     )
     if (runtimeUpgrade && isPackageInstalled('open-webui')) {
       try {
@@ -2071,6 +2075,7 @@ if (!gotTheLock) {
 
     ipcMain.handle('open-webui:sync', () => syncOpenWebUI())
 
+    ipcMain.handle('workspace:preview:inspect', workspacePreview.inspect)
     ipcMain.handle('workspace:preview:open', workspacePreview.open)
     ipcMain.handle('workspace:preview:close', workspacePreview.close)
     ipcMain.handle('workspace:preview:get-active', workspacePreview.getActive)

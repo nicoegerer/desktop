@@ -101,7 +101,7 @@ export function createTerminalStoreBridge(
           stores.selectedTerminalId.set(null)
           // Let Svelte unmount FileNav, discarding its preview and back stack,
           // before mounting the new terminal. Do not reload or reset the chat.
-          await Promise.resolve()
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
           if (!isCurrent()) return false
         }
         if (terminals) {

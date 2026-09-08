@@ -8,7 +8,8 @@ import crypto from 'crypto'
 
 import * as tar from 'tar'
 
-import { app, shell, Notification, net as electronNet } from 'electron'
+import { app, shell, Notification, net as electronNet, session } from 'electron'
+import { prepareWorkspaceFrontend } from '../services/workspace-frontend'
 import { execFileSync, exec, spawn, execSync, execFile } from 'child_process'
 
 import log from 'electron-log'
@@ -557,9 +558,16 @@ export const backupOpenWebUIDatabase = async (): Promise<string | null> => {
     '    source.close()'
   ].join('\n')
   await new Promise<void>((resolve, reject) => {
-    execFile(getPythonPath(), ['-c', code, source, target], {
-      env: pythonEnv(), windowsHide: true, timeout: 60_000
-    }, (error) => error ? reject(error) : resolve())
+    execFile(
+      getPythonPath(),
+      ['-c', code, source, target],
+      {
+        env: pythonEnv(),
+        windowsHide: true,
+        timeout: 60_000
+      },
+      (error) => (error ? reject(error) : resolve())
+    )
   })
   log.info('Open WebUI database backup created:', target)
   return target
@@ -610,6 +618,17 @@ export const startServer = async (
     throw new Error(`Python executable not found at: ${pythonPath}`)
   }
 
+  const frontend = execFileSync(
+    pythonPath,
+    [
+      '-c',
+      "import importlib.util,pathlib; print(pathlib.Path(importlib.util.find_spec('open_webui').origin).parent / 'frontend')"
+    ],
+    { encoding: 'utf8', windowsHide: true }
+  ).trim()
+  await prepareWorkspaceFrontend(frontend)
+  // Immutable asset URLs are unchanged; never reuse an unpatched cached chunk.
+  await session.fromPartition('persist:connection-local').clearCache()
   const commandArgs = ['-m', 'uv', 'run', 'open-webui', 'serve', '--host', host]
   const dataDir = getOpenWebUIDataPath()
   const secretKey = getSecretKey()
