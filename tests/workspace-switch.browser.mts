@@ -130,8 +130,8 @@ test(
     <script type="module">
       ${imports}
       import {TestControls} from '/_app/immutable/chunks/${controlsFile}';
-      const delay=ms=>new Promise(r=>setTimeout(r,ms)); const checks=[];
-      const waitFor=async(fn,label)=>{for(let i=0;i<100;i++){if(fn())return;await delay(50)}throw new Error(label+'; fixture: '+document.getElementById('fixture').innerText.slice(-1200))};
+      const delay=ms=>new Promise(r=>setTimeout(r,ms)); const checks=['Viewport '+innerWidth+'px ('+(innerWidth>=1024?'sidebar':'drawer')+')'];
+      const waitFor=async(fn,label)=>{for(let i=0;i<100;i++){if(fn())return;await delay(50)}throw new Error(label+'; fixture: '+document.body.innerText.slice(-1200))};
       const i18n={subscribe(fn){fn({t:v=>v});return ()=>{}}};
       localStorage.token='test-only';
       const saved=location.search.includes('saved');
@@ -151,7 +151,13 @@ test(
       window.addEventListener('error',e=>fetch('/result',{method:'POST',body:JSON.stringify({ok:false,error:e.message})}));
       try{
         await delay(300); await choose('desktop-first');
-        const text=()=>document.getElementById('controls-container')?.textContent||'';
+        // A Windows runner may clamp the window below the desktop breakpoint.
+        // The mobile Drawer portals outside #fixture and has no controls-container ID.
+        const text=()=>{
+          const files=[...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='Files'&&
+            [...button.parentElement.children].some(sibling=>sibling.textContent.trim()==='Controls'));
+          return files?.parentElement.parentElement.nextElementSibling?.textContent||'';
+        };
         await waitFor(()=>text().includes('first.html'),'First directory did not render');checks.push('First original folder');
         await choose('desktop-second');
         await waitFor(()=>text().includes('second.html')&&!text().includes('first.html'),'Draft kept first directory after folder switch');checks.push('Draft switches to second folder');
@@ -266,7 +272,7 @@ test(
       await writeFile(
         runner,
         "const {app,BrowserWindow}=require('electron');" +
-          `app.setPath('userData',${JSON.stringify(path.join(directory, 'profile'))});app.whenReady().then(async()=>{const w=new BrowserWindow({width:1280,height:900,show:${!!process.env.WORKSPACE_BROWSER_VISIBLE},title:'Open WebUI – Workspace Regression',webPreferences:{contextIsolation:true,nodeIntegration:false}});w.webContents.on('console-message',(_e,_l,message)=>{if(/Error|error/.test(message))console.log(message.slice(0,400))});await w.loadURL('http://127.0.0.1:${address.port}/');});app.on('window-all-closed',()=>app.quit());`
+          `app.setPath('userData',${JSON.stringify(path.join(directory, 'profile'))});app.whenReady().then(async()=>{const w=new BrowserWindow({width:${Number(process.env.WORKSPACE_BROWSER_WIDTH) || 1280},height:900,show:${!!process.env.WORKSPACE_BROWSER_VISIBLE},title:'Open WebUI – Workspace Regression',webPreferences:{contextIsolation:true,nodeIntegration:false}});w.webContents.on('console-message',(_e,_l,message)=>{if(/Error|error/.test(message))console.log(message.slice(0,400))});await w.loadURL('http://127.0.0.1:${address.port}/');});app.on('window-all-closed',()=>app.quit());`
       )
       const env = { ...process.env }
       delete env.ELECTRON_RUN_AS_NODE
@@ -297,6 +303,8 @@ test(
       child?.kill()
       await new Promise<void>((resolve) => server.close(() => resolve()))
       // Only this uniquely created fixture directory, never user workspaces.
+      assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()))
+      assert.ok(path.basename(directory).startsWith('workspace-real-frontend-'))
       await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     }
   }
