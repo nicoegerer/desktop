@@ -246,7 +246,7 @@
         )
         return
       }
-      if (githubDraft && !draft.accessToken?.trim()) {
+      if (githubDraft && draft.remote?.authSource !== 'github-cli' && !draft.accessToken?.trim()) {
         editorError = l(
           'GitHub benötigt ein Personal Access Token mit nur den benötigten Rechten.',
           'GitHub requires a Personal Access Token with only the permissions you need.'
@@ -679,8 +679,8 @@
       {#if editorError}<div class="feedback error" role="alert">{editorError}</div>{/if}
       {#if githubDraft}<p class="intro">
           {l(
-            'Verbinde den offiziellen GitHub-Server mit einem persönlichen Zugriffstoken. Kein Docker nötig.',
-            'Connect the official GitHub server with a Personal Access Token. No Docker required.'
+            'Nutze deine vorhandene GitHub-CLI-Anmeldung oder verbinde den offiziellen MCP-Server mit einem Token. Kein Docker nötig.',
+            'Use your existing GitHub CLI login or connect the official MCP server with a token. No Docker required.'
           )}
         </p>{/if}
       <label
@@ -691,6 +691,42 @@
         /></label
       >
       {#if draft.type === 'remote' && draft.remote}
+        {#if githubDraft}
+          <label
+            >{l('GitHub-Zugang', 'GitHub access')}
+            <select
+              value={draft.remote.authSource ?? 'token'}
+              onchange={(event) => {
+                if (draft?.remote)
+                  draft.remote.authSource = event.currentTarget.value as 'token' | 'github-cli'
+              }}
+            >
+              <option value="token"
+                >{l('Personal Access Token (MCP)', 'Personal Access Token (MCP)')}</option
+              >
+              <option value="github-cli"
+                >{l('Vorhandene GitHub-CLI-Anmeldung', 'Existing GitHub CLI login')}</option
+              >
+            </select>
+            <small
+              >{draft.remote.authSource === 'github-cli'
+                ? l(
+                    'Gleiches Konto wie gh, ohne Token-Kopie. Actions, Logs und Pages lesen; Dateien im gewählten Cloud-Arbeitsbereich schreiben. Auf deinen Chat-Auftrag: Pages aktivieren oder Workflows starten/neustarten (kann Websites veröffentlichen). Keine Repository-Löschung oder Änderung von Kontorechten.',
+                    'Same account as gh, without copying tokens. Read Actions, logs and Pages; write files in the selected cloud workspace. On your chat request: enable Pages or start/rerun workflows (may publish websites). No repository deletion or account-permission changes.'
+                  )
+                : l(
+                    'Der offizielle MCP-Server nutzt die Rechte deines Tokens.',
+                    'The official MCP server uses your token permissions.'
+                  )}</small
+            >
+          </label>
+          {#if draft.remote.authSource === 'github-cli'}<p class="intro">
+              {l(
+                'GitHub CLI muss installiert und mit „gh auth login“ angemeldet sein. Beim Speichern wird die Anmeldung geprüft.',
+                'GitHub CLI must be installed and signed in with “gh auth login”. Saving checks the login.'
+              )}
+            </p>{/if}
+        {/if}
         {#if !githubDraft}<label
             >{l('Serveradresse', 'Server address')}<input
               type="url"
@@ -704,27 +740,28 @@
               )}</small
             ></label
           >{/if}
-        <label
-          >{githubDraft
-            ? l('Personal Access Token', 'Personal Access Token')
-            : l('Zugriffstoken (optional)', 'Access token (optional)')}<input
-            type="password"
-            autocomplete="off"
-            required={githubDraft}
-            bind:value={draft.accessToken}
-          /><small
-            >{l(
-              'Wird lokal verschlüsselt gespeichert. Teile nur die benötigten Berechtigungen.',
-              'Stored encrypted on this computer. Grant only the permissions you need.'
-            )}</small
-          ></label
-        >
-        {#if githubDraft}<button
-            type="button"
-            class="text-button inline-link"
-            onclick={() => external('https://github.com/settings/personal-access-tokens/new')}
-            >{l('Token bei GitHub erstellen ↗', 'Create a token on GitHub ↗')}</button
-          >{/if}
+        {#if draft.remote.authSource !== 'github-cli'}<label
+            >{githubDraft
+              ? l('Personal Access Token', 'Personal Access Token')
+              : l('Zugriffstoken (optional)', 'Access token (optional)')}<input
+              type="password"
+              autocomplete="off"
+              required={githubDraft}
+              bind:value={draft.accessToken}
+            /><small
+              >{l(
+                'Wird lokal verschlüsselt gespeichert. Teile nur die benötigten Berechtigungen.',
+                'Stored encrypted on this computer. Grant only the permissions you need.'
+              )}</small
+            ></label
+          >
+          {#if githubDraft}<button
+              type="button"
+              class="text-button inline-link"
+              onclick={() => external('https://github.com/settings/personal-access-tokens/new')}
+              >{l('Token bei GitHub erstellen ↗', 'Create a token on GitHub ↗')}</button
+            >{/if}
+        {/if}
       {:else if draft.type === 'mcpo' && draft.mcpo}
         <p class="intro">
           {l(

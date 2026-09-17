@@ -22,6 +22,8 @@ import {
 import { resolveExecutable } from './executables'
 import { ManagedServicesRegistry } from './registry'
 import { LineRingBuffer } from './ring-buffer'
+import { GithubCliBridge } from './github-cli-bridge'
+import type { GithubRequest } from '../../shared/services/github-write'
 
 interface ServiceRuntime {
   definition: ManagedServiceDefinition
@@ -47,6 +49,7 @@ const errorMessage = (error: unknown): string =>
 
 export class ManagedServicesManager {
   private readonly runtimes = new Map<string, ServiceRuntime>()
+  private readonly githubBridges = new Map<string, GithubCliBridge>()
   private shuttingDown = false
   private quitComplete = false
   private quitPromise: Promise<void> | null = null
@@ -87,6 +90,14 @@ export class ManagedServicesManager {
   getIntegration(id: string): ManagedServiceIntegration {
     const runtime = this.getRuntime(id)
     if (runtime.definition.type === 'remote' && runtime.definition.remote) {
+      if (runtime.definition.remote.authSource === 'github-cli') {
+        return {
+          url: 'https://github.com',
+          bearerKey: '',
+          commandPreview:
+            'Existing GitHub CLI login; no token is copied. GitHub reads and selected-workspace file/Pages/Actions tools.'
+        }
+      }
       return {
         url: runtime.definition.remote.url,
         bearerKey: this.registry.getAccessToken(runtime.definition.id) ?? '',
@@ -139,6 +150,13 @@ export class ManagedServicesManager {
       }
 
       if (definition.type === 'remote' && definition.remote) {
+        if (definition.remote.authSource === 'github-cli') {
+          const target = this.githubBridges
+            .get(definition.id)
+            ?.target(definition.id, definition.name, definition.enabled)
+          if (target) targets.unshift(target)
+          continue
+        }
         targets.push({
           id: definition.id,
           name: definition.name,
@@ -161,12 +179,33 @@ export class ManagedServicesManager {
    * second credential.
    */
   getGithubAccessToken(): string | null {
+    if (
+      [...this.runtimes.values()].some(
+        (runtime) =>
+          runtime.definition.enabled && runtime.definition.remote?.authSource === 'github-cli'
+      )
+    )
+      return null
     for (const runtime of this.runtimes.values()) {
       const definition = runtime.definition
+      if (!definition.enabled) continue
       if (definition.type !== 'remote' || !definition.remote) continue
       if (!/(^|\.)github(copilot)?\.com/i.test(new URL(definition.remote.url).hostname)) continue
+      if (definition.remote.authSource === 'github-cli') return null
       const token = this.registry.getAccessToken(definition.id)
       if (token) return token
+    }
+    return null
+  }
+
+  /** No credentials leave the CLI process. No fallback to another account on failure. */
+  getGithubCliRequest(): GithubRequest | null {
+    for (const runtime of this.runtimes.values()) {
+      if (!runtime.definition.enabled || runtime.definition.remote?.authSource !== 'github-cli')
+        continue
+      return runtime.status === 'running'
+        ? (this.githubBridges.get(runtime.definition.id)?.request ?? null)
+        : null
     }
     return null
   }
@@ -220,6 +259,27 @@ export class ManagedServicesManager {
     this.setStatus(runtime, 'starting')
 
     if (runtime.definition.type === 'remote' && runtime.definition.remote) {
+      if (runtime.definition.remote.authSource === 'github-cli') {
+        const bridge = new GithubCliBridge()
+        this.githubBridges.set(id, bridge)
+        try {
+          const login = await bridge.start()
+          if (runtime.generation !== generation || runtime.stopRequested || this.shuttingDown) {
+            await bridge.stop()
+            return this.snapshot(runtime)
+          }
+          runtime.logs.add(
+            `GitHub CLI connected as ${login}. Reads and scoped workspace file/Pages/Actions tools are available; no token copied.`
+          )
+          this.setStatus(runtime, 'running')
+          return this.snapshot(runtime)
+        } catch (error) {
+          await bridge.stop()
+          if (runtime.generation !== generation) return this.snapshot(runtime)
+          if (this.githubBridges.get(id) === bridge) this.githubBridges.delete(id)
+          return this.fail(runtime, errorMessage(error), false)
+        }
+      }
       runtime.logs.add(`Checking remote endpoint ${runtime.definition.remote.url}`)
       if (await isHealthCheckReady(runtime.definition.remote.url)) {
         runtime.ownsProcess = false
@@ -362,6 +422,9 @@ export class ManagedServicesManager {
     if (runtime.definition.type === 'remote') {
       runtime.stopRequested = true
       runtime.generation += 1
+      const bridge = this.githubBridges.get(id)
+      this.githubBridges.delete(id)
+      await bridge?.stop()
       runtime.lastError = undefined
       runtime.logs.add('Remote endpoint monitoring stopped')
       this.setStatus(runtime, 'stopped')

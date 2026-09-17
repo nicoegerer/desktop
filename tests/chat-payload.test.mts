@@ -278,3 +278,29 @@ test('the injected source is self-contained so it survives toString injection', 
   assert.ok(!/\brequire\(/.test(source))
   assert.ok(source.startsWith('function applyWorkspaceToPayload'))
 })
+
+test('compact GitHub tools precede large connector catalogs in every chat', () => {
+  const github = 'server:desktop-github-cli-github-existing'
+  for (const selection of [
+    null,
+    { mode: 'cloud' as const, terminalId: 'desktop-gh-test', repoFullName: 'o/r', branch: 'main' }
+  ]) {
+    const out = applyWorkspaceToPayload(
+      { messages: userTurn(), tool_ids: ['garmin'] },
+      { selection, alwaysOnToolIds: ['garmin', github] }
+    )
+    const ids = out.tool_ids as string[]
+    assert.ok(ids.indexOf(github) < ids.indexOf('garmin'))
+    const functions = ids
+      .flatMap((id) =>
+        id === github
+          ? ['github_api_read', 'github_actions_logs']
+          : id.includes('workspace')
+            ? ['read_file', 'write_file']
+            : Array.from({ length: 200 }, (_, i) => 'garmin_' + i)
+      )
+      .slice(0, 128)
+    assert.ok(functions.includes('github_api_read'))
+    assert.ok(functions.includes('github_actions_logs'))
+  }
+})

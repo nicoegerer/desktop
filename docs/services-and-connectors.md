@@ -122,6 +122,33 @@ is not lost the moment it is used.
 
 ## GitHub MCP preset
 
+### Existing GitHub CLI login
+
+The GitHub connector now has an explicit **GitHub access → Existing GitHub CLI login** option.
+It is opt-in, never enabled merely because `gh` is installed. It uses the active `github.com`
+CLI account without exporting, copying or storing its token in Open WebUI. Install GitHub CLI
+and sign in with `gh auth login` yourself before selecting this mode. A failed login does not
+silently fall back to the connector's saved token or another account.
+
+This mode exposes two compact, always-on read tools ahead of large catalogs such as Garmin:
+`github_api_read` for REST API status (repositories, permissions, Actions runs/jobs, Pages,
+issues, pull requests and releases), and `github_actions_logs` for actual paginated log text.
+The Cloud picker, verified file writer and static preview use the same CLI account. File writes
+remain scoped to the selected repository/branch. No local shell or checkout is exposed.
+
+This is **not an unrestricted GitHub administration interface**. The selected Cloud workspace
+additionally exposes `github_workspace_action`: enable Pages for Actions, dispatch an existing
+workflow on the selected branch, or rerun a completed run belonging to that branch (not a fork).
+These operations require an explicit request in the current chat and can publish a website.
+Repository/branch overrides, repository deletion and account-permission changes are not supported.
+Existing legacy Pages publishing sources are preserved, not silently switched. No operation is
+performed merely by selecting a workspace. Dispatch acceptance is not deployment success: inspect
+the run and logs afterwards. Uncertain requests are not retried automatically.
+
+Disabling/removing the connector closes its loopback bridge and revokes cached workspace reads.
+Switching back to Token mode preserves the previously encrypted token and restores the official
+MCP connector. The shipped default remains Token mode; account access is never bundled in releases.
+
 Choose **Add → GitHub MCP** for an optional template based on GitHub's official MCP server. The
 template uses the official hosted endpoint at `https://api.githubcopilot.com/mcp/`, does not require
 Docker, and does not contain an account or token. The user must enter a fine-grained Personal Access

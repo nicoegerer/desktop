@@ -73,6 +73,15 @@ export function applyWorkspaceToPayload(
   if (selection?.terminalId) {
     toolIds.push(`server:desktop-workspace-${selection.terminalId}`)
   }
+  // Two compact GitHub tools must survive providers' tool-count limits, too.
+  for (const id of alwaysOn) {
+    if (
+      typeof id === 'string' &&
+      id.startsWith('server:desktop-github-cli-') &&
+      !toolIds.includes(id)
+    )
+      toolIds.push(id)
+  }
   for (const id of [...existingToolIds, ...alwaysOn]) {
     if (typeof id !== 'string' || !id || id.startsWith('server:desktop-workspace-')) continue
     if (toolIds.indexOf(id) === -1) toolIds.push(id)
@@ -147,7 +156,11 @@ export function applyWorkspaceToPayload(
       ' Verify with read_file and report the actual repository, path, branch and commit. Report permission or' +
       ' conflict errors honestly; never claim a write succeeded without verification.' +
       ' There is no local checkout or shell. Do not switch to another local folder. Broader GitHub tools remain' +
-      ' available for explicitly requested repository operations.'
+      ' available for explicitly requested repository operations.' +
+      ' When github_api_read and github_actions_logs are available, use them to inspect Actions runs, failed logs and Pages status.' +
+      ' A file commit or workflow edit is not evidence of a successful build or deployment; verify the actual run conclusion.' +
+      ' For explicitly requested deployment, github_workspace_action can enable Pages and dispatch/rerun workflows only in this selected repository branch.' +
+      ' These actions can publish a website. Do not call them for a status question or mere file edit; never treat an accepted run as completed.'
 
     const systemIndex = cleaned.findIndex((message) => message && message.role === 'system')
     const entry = { role: 'system', content: instruction }

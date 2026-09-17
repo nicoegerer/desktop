@@ -13,6 +13,8 @@ export interface McpoServiceOptions {
 
 export interface RemoteServiceOptions {
   url: string
+  /** Explicit opt-in. Never use an installed CLI account merely because it exists. */
+  authSource?: 'token' | 'github-cli'
 }
 
 export interface ManagedServiceDefinition {

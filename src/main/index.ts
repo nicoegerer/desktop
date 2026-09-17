@@ -1320,7 +1320,10 @@ if (!gotTheLock) {
     })
 
     // The repository view reuses the connector's token; it never asks for one.
-    configureGithubFs(() => getManagedServicesManager()?.getGithubAccessToken() ?? null)
+    configureGithubFs(
+      () => getManagedServicesManager()?.getGithubAccessToken() ?? null,
+      () => getManagedServicesManager()?.getGithubCliRequest() ?? null
+    )
 
     void initializeManagedServices().then(() => {
       getManagedServicesManager()?.onChange(() => scheduleOpenWebUISync())
@@ -2164,7 +2167,9 @@ if (!gotTheLock) {
 
     ipcMain.handle('workspace:chip:repos', async () => {
       try {
-        const token = getManagedServicesManager()?.getGithubAccessToken()
+        const token =
+          getManagedServicesManager()?.getGithubCliRequest() ??
+          getManagedServicesManager()?.getGithubAccessToken()
         if (!token) {
           return {
             ok: false,

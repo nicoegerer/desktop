@@ -109,6 +109,17 @@ test('editing GitHub preserves the access token and disabled state without manuf
   assert.equal(payload.enabled, false)
   assert.equal(payload.remote?.url, 'https://api.githubcopilot.com/mcp/')
   assert.equal(original.remote?.url, ' https://api.githubcopilot.com/mcp/ ')
+  const cli = connectorPayload(
+    { ...original, remote: { ...original.remote!, authSource: 'github-cli' } },
+    '',
+    []
+  )
+  assert.equal(cli.remote?.authSource, 'github-cli')
+  assert.equal(
+    cli.accessToken,
+    'test-token',
+    'changing auth mode preserves the encrypted fallback for manual switching'
+  )
 })
 
 test('a new MCP connector requests a fresh server-generated key, not a copied key', () => {

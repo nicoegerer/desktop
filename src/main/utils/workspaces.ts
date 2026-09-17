@@ -67,8 +67,10 @@ export const rememberWorkspace = async (workspacePath: string): Promise<Workspac
     lastUsedAt: Date.now()
   }
 
-  const recent = [entry, ...readRecent(config).filter((item) => comparablePath(item.path) !== key)]
-    .slice(0, MAX_RECENT_WORKSPACES)
+  const recent = [
+    entry,
+    ...readRecent(config).filter((item) => comparablePath(item.path) !== key)
+  ].slice(0, MAX_RECENT_WORKSPACES)
 
   await setConfig({ workspaces: { ...(config.workspaces ?? {}), recent } } as Partial<AppConfig>)
   return recent
@@ -98,16 +100,22 @@ export const setWorkspaceActive = async (
 
 // ─── GitHub ─────────────────────────────────────────────
 
-const githubRequest = async (token: string, urlPath: string): Promise<unknown> => {
-  const response = await electronNet.fetch(`${GITHUB_API}${urlPath}`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'OpenWebUI-Desktop'
-    },
-    signal: AbortSignal.timeout(20_000)
-  })
+const githubRequest = async (
+  token: string | ((path: string) => Promise<Response>),
+  urlPath: string
+): Promise<unknown> => {
+  const response =
+    typeof token === 'function'
+      ? await token(urlPath)
+      : await electronNet.fetch(`${GITHUB_API}${urlPath}`, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'OpenWebUI-Desktop'
+          },
+          signal: AbortSignal.timeout(20_000)
+        })
 
   if (response.status === 401 || response.status === 403) {
     throw new Error(
@@ -125,7 +133,9 @@ const githubRequest = async (token: string, urlPath: string): Promise<unknown> =
  * entries deliberately contain no local path: browsing uses the read-only
  * GitHub terminal mount and writes go through GitHub MCP.
  */
-export const listGithubRepositories = async (token: string): Promise<GithubRepoEntry[]> => {
+export const listGithubRepositories = async (
+  token: string | ((path: string) => Promise<Response>)
+): Promise<GithubRepoEntry[]> => {
   const repositories: GithubRepoEntry[] = []
 
   for (let page = 1; page <= 4; page++) {

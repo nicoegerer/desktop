@@ -37,6 +37,79 @@ const loadServer = (fakeGithub: (input: string, init?: RequestInit) => Promise<R
   return module.exports
 }
 
+test('cloud filesystem uses CLI transport and revokes cached content/preview when disabled', async () => {
+  const server = loadServer(async () => {
+    throw new Error('must not use PAT transport')
+  })
+  let reads = 0
+  const cli = async () => {
+    reads++
+    return Response.json([{ name: 'index.html', path: 'index.html', type: 'file', size: 10 }])
+  }
+  let enabled = true
+  server.configureGithubFs(
+    () => null,
+    () => (enabled ? cli : null)
+  )
+  try {
+    const mount = await server.mountGithubRepo({ repoFullName: 'owner/repo', branch: 'main' })
+    const headers = { Authorization: 'Bearer ' + mount.apiKey }
+    const read = () => fetch(mount.url + '/files/list?directory=/', { headers })
+    assert.equal((await read()).status, 200)
+    assert.equal((await read()).status, 200)
+    assert.equal(reads, 1)
+    const preview = server.getGithubPreviewSource(mount.id)
+    assert.equal(preview.isActive(), true)
+    enabled = false
+    assert.equal((await read()).status, 401, 'cached files must not survive revocation')
+    assert.equal(preview.isActive(), false)
+    assert.equal(server.getGithubPreviewSource(mount.id), undefined)
+    enabled = true
+    assert.equal((await read()).status, 200)
+    assert.equal(reads, 2, 're-enabling refreshes file cache')
+  } finally {
+    await server.stopGithubFs()
+  }
+})
+
+test('workspace action HTTP route is authenticated, mounted and cannot override its repository', async () => {
+  const calls: string[] = []
+  const server = loadServer(async (input: string) => {
+    calls.push(input)
+    assert.equal(input, 'https://api.github.com/repos/owner/repo/pages')
+    return Response.json({ build_type: 'workflow' })
+  })
+  try {
+    const mount = await server.mountGithubRepo({ repoFullName: 'owner/repo', branch: 'main' })
+    const url = mount.url + '/github/action'
+    const headers = { Authorization: 'Bearer ' + mount.apiKey, 'Content-Type': 'application/json' }
+    const body = { action: 'pages_enable', user_requested: true }
+    assert.equal((await fetch(url, { method: 'POST', body: JSON.stringify(body) })).status, 401)
+    assert.equal(
+      (
+        await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...body, repository: 'other/repo' })
+        })
+      ).status,
+      400
+    )
+    assert.equal(calls.length, 0)
+    const result = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+    assert.equal(result.status, 200)
+    assert.equal((await result.json()).repository, 'owner/repo')
+    server.unmountGithubRepos(new Set())
+    assert.equal(
+      (await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })).status,
+      404
+    )
+    assert.equal(calls.length, 1)
+  } finally {
+    await server.stopGithubFs()
+  }
+})
+
 for (const initiallyEmpty of [false, true])
   test('cloud HTTP list/write/read/preview lifecycle; unborn repo=' + initiallyEmpty, async () => {
     const files = new Map<string, string>()

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.35] - 2026-09-17
+
+### Added
+
+- Opt-in reuse of the existing GitHub CLI login without exporting or copying its token.
+  Cloud repositories, file writes and previews now use the selected account consistently.
+- Compact always-on GitHub API reads and real Actions logs, prioritized before large tool
+  catalogs. Models can inspect deployment errors instead of only editing workflow files.
+- Explicitly requested Pages activation and workflow dispatch/rerun tools, fixed to the
+  selected Cloud repository and branch. No account administration or repository deletion.
+
+### Fixed
+
+- Revoke workspace caches and previews when the GitHub connection changes or is disabled.
+  Never silently fall back from CLI authentication to a different saved token.
+- Report permission failures and dispatch acceptance honestly; never infer a successful
+  deployment from a file commit. Preserve existing Pages sources and reject fork reruns.
+
+### Tests
+
+- Cover CLI transport, credential isolation, live loopback routes, tool prioritization,
+  connection revocation, action scope, invalid inputs and uncertain-request handling.
+
 ## [0.0.20-services.34] - 2026-09-17
 
 ### Fixed

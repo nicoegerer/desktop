@@ -14,12 +14,14 @@ import {
   toFileEntries
 } from '../../shared/services/github-contents'
 import { githubWorkspaceOpenApi } from '../../shared/services/github-workspace-openapi'
+import { githubWorkspaceAction } from '../../shared/services/github-workspace-actions'
 import { hasUnbornDefaultBranch } from '../../shared/services/github-empty'
 import {
   GithubWorkspaceWriter,
   githubContentsPath,
   validateGithubScope
 } from '../../shared/services/github-write'
+import type { GithubRequest } from '../../shared/services/github-write'
 
 /**
  * A scoped filesystem view of a GitHub repository, served in the shape Open
@@ -60,10 +62,29 @@ let server: http.Server | null = null
 let listeningPort = 0
 let apiKey = ''
 let tokenResolver: () => string | null = () => null
+let cliResolver: () => GithubRequest | null = () => null
 const mounts = new Map<string, Mount>()
 const cache = new Map<string, CacheEntry>()
 const previewSources = new Map<string, { at: number; source: WorkspacePreviewSource }>()
+const credentialIdentity = (): string | GithubRequest | null => {
+  const cli = cliResolver()
+  if (cli) return cli
+  const token = tokenResolver()
+  return token ? crypto.createHash('sha256').update(token).digest('hex') : null
+}
+let lastIdentity: ReturnType<typeof credentialIdentity> = null
+const refreshCredentialIdentity = (): ReturnType<typeof credentialIdentity> => {
+  const identity = credentialIdentity()
+  if (identity !== lastIdentity) {
+    cache.clear()
+    previewSources.clear()
+    lastIdentity = identity
+  }
+  return identity
+}
 const githubRequest = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  const cli = cliResolver()
+  if (cli) return cli(path, init)
   const token = tokenResolver()
   if (!token)
     throw Object.assign(new Error('No GitHub connector token is configured'), { status: 401 })
@@ -92,8 +113,12 @@ export const githubMountSlug = (repo: GithubRepoRef): string =>
 export const githubTerminalId = (repo: GithubRepoRef): string =>
   `desktop-gh-${githubMountSlug(repo)}`
 
-export const configureGithubFs = (resolver: () => string | null): void => {
+export const configureGithubFs = (
+  resolver: () => string | null,
+  cli: () => GithubRequest | null = () => null
+): void => {
   tokenResolver = resolver
+  cliResolver = cli
 }
 
 // ─── GitHub ─────────────────────────────────────────────
@@ -211,6 +236,41 @@ const handle = async (
   }
 
   try {
+    if (route !== '/openapi.json' && !refreshCredentialIdentity()) {
+      send(response, 401, { detail: 'The GitHub connector is disabled or not signed in.' })
+      return
+    }
+    if (route === '/github/action' && request.method === 'POST') {
+      const identity = refreshCredentialIdentity()
+      let size = 0
+      const chunks: Buffer[] = []
+      for await (const chunk of request) {
+        size += chunk.length
+        if (size > 70_000) {
+          send(response, 413, { detail: 'GitHub action request too large.' })
+          return
+        }
+        chunks.push(Buffer.from(chunk))
+      }
+      let body: unknown
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      } catch {
+        send(response, 400, { detail: 'Expected a JSON action.' })
+        return
+      }
+      send(
+        response,
+        200,
+        await githubWorkspaceAction(
+          mount,
+          body,
+          githubRequest,
+          () => mounts.get(mount.slug) === mount && credentialIdentity() === identity
+        )
+      )
+      return
+    }
     if (route === '/files/write' && request.method === 'POST') {
       let size = 0
       const chunks: Buffer[] = []
@@ -379,6 +439,8 @@ export const getGithubPreviewSource = (
   terminalId: string,
   fresh = false
 ): WorkspacePreviewSource | undefined => {
+  const identity = refreshCredentialIdentity()
+  if (!identity) return undefined
   const mount = [...mounts.values()].find((entry) => githubTerminalId(entry) === terminalId)
   if (!mount) return undefined
   const cached = previewSources.get(mount.slug)
@@ -386,7 +448,7 @@ export const getGithubPreviewSource = (
   const source = createGithubPreviewSource(
     mount,
     githubRequest,
-    () => mounts.get(mount.slug) === mount && !!tokenResolver()
+    () => mounts.get(mount.slug) === mount && credentialIdentity() === identity
   )
   previewSources.set(mount.slug, { at: Date.now(), source })
   return source

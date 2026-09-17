@@ -24,6 +24,11 @@ export function connectorPayload(
             remote: undefined,
             accessToken: undefined
           }
-        : { command: '', args: [], mcpo: undefined, remote: { url: draft.remote!.url.trim() } })
+        : {
+            command: '',
+            args: [],
+            mcpo: undefined,
+            remote: { ...draft.remote!, url: draft.remote!.url.trim() }
+          })
   }
 }

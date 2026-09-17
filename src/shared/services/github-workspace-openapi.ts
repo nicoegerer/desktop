@@ -3,11 +3,69 @@ export const githubWorkspaceOpenApi = (title: string): Record<string, unknown> =
   openapi: '3.1.0',
   info: {
     title: `GitHub workspace: ${title}`,
-    version: '2.0.0',
+    version: '3.0.0',
     description:
       'Read and save files directly in the selected repository and branch. Writes create verified GitHub commits; no local checkout or shell.'
   },
   paths: {
+    '/github/action': {
+      post: {
+        operationId: 'github_workspace_action',
+        summary: 'Enable Pages or start/rerun a workflow in the selected repository',
+        description:
+          'Use ONLY when the user explicitly requests this operation or deployment in the current chat. Pages activation can publish a website. The repository and branch are fixed by the current workspace; they cannot be supplied or overridden. pages_enable enables GitHub Actions as the Pages source without changing an existing legacy/custom setup. workflow_dispatch starts a workflow on this branch; workflow_rerun reruns a completed run from this same repository branch (failed jobs by default). No repository deletion or account administration. A successful response means configured/accepted, NEVER deployed successfully: use github_api_read and github_actions_logs to verify actual run status. Do not blindly repeat an uncertain dispatch.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['action', 'user_requested'],
+                properties: {
+                  action: {
+                    type: 'string',
+                    enum: ['pages_enable', 'workflow_dispatch', 'workflow_rerun']
+                  },
+                  user_requested: {
+                    type: 'boolean',
+                    description:
+                      'True only when the current user request authorizes this operation/deployment.'
+                  },
+                  workflow_id: {
+                    type: 'string',
+                    description:
+                      'For dispatch only: numeric workflow ID or filename such as deploy.yml.'
+                  },
+                  inputs_json: {
+                    type: 'string',
+                    description:
+                      'For dispatch only: optional JSON object of workflow inputs. Branch/ref is supplied by the workspace.'
+                  },
+                  run_id: {
+                    type: 'string',
+                    description: 'For rerun only: numeric run ID on the selected branch.'
+                  },
+                  failed_only: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'For rerun only: false reruns all jobs.'
+                  }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '200': { description: 'Verified configuration or accepted run, not deployment success.' },
+          '403': { description: 'GitHub denied Pages/Actions write access.' },
+          '409': {
+            description: 'Workspace/branch mismatch or existing Pages source was preserved.'
+          }
+        },
+        security: [{ HTTPBearer: [] }]
+      }
+    },
     '/files/write': {
       post: {
         operationId: 'write_file',

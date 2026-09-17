@@ -165,6 +165,16 @@ export const normalizeServiceDefinition = (
     base.remote = {
       url: assertRemoteEndpointUrl(asString(value.remote.url, 'remote.url'))
     }
+    if (value.remote.authSource !== undefined) {
+      if (!['token', 'github-cli'].includes(String(value.remote.authSource)))
+        throw new Error('Invalid authentication source')
+      if (
+        value.remote.authSource === 'github-cli' &&
+        new URL(base.remote.url).hostname !== 'api.githubcopilot.com'
+      )
+        throw new Error('GitHub CLI authentication is only available for the GitHub connector')
+      base.remote.authSource = value.remote.authSource as 'token' | 'github-cli'
+    }
     if (value.accessToken !== undefined && value.accessToken !== '') {
       base.accessToken = asString(value.accessToken, 'accessToken')
     }
