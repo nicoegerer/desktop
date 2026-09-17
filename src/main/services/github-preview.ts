@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { GithubRequest, GithubWriteScope } from '../../shared/services/github-write'
 import { validateGithubScope } from '../../shared/services/github-write'
+import { hasUnbornDefaultBranch } from '../../shared/services/github-empty'
 import type { WorkspacePreviewSource } from './workspace-preview-source'
 
 const MAX_BYTES = 64 * 1024 * 1024
@@ -55,8 +56,8 @@ export function createGithubPreviewSource(
     assertActive()
     // Resolve the branch once. Every resource in a page uses this same tree,
     // even if a subsequent model write moves the branch while the page loads.
-    snapshot ??= get('trees/' + encodeURIComponent(branch) + '?recursive=1', 8 * 1024 * 1024).then(
-      (tree) => {
+    snapshot ??= get('trees/' + encodeURIComponent(branch) + '?recursive=1', 8 * 1024 * 1024)
+      .then((tree) => {
         if (!shaPattern.test(tree.sha) || tree.truncated !== false || !Array.isArray(tree.tree))
           throw fail()
         const result = new Map<string, BlobEntry>()
@@ -78,8 +79,16 @@ export function createGithubPreviewSource(
           result.set(entry.path, { sha: entry.sha, size: entry.size })
         }
         return result
-      }
-    )
+      })
+      .catch(async (error) => {
+        const status = (error as { status?: number }).status
+        assertActive()
+        if ((status === 404 || status === 409) && (await hasUnbornDefaultBranch(scope, request))) {
+          assertActive()
+          return new Map<string, BlobEntry>()
+        }
+        throw error
+      })
     return snapshot
   }
   const bodies = new Map<string, Buffer>()

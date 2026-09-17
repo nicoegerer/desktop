@@ -13,7 +13,7 @@ export const githubWorkspaceOpenApi = (title: string): Record<string, unknown> =
         operationId: 'write_file',
         summary: 'Save a file in the selected GitHub workspace',
         description:
-          'Create or replace a UTF-8 text file directly on the selected repository branch. Each call commits the file and verifies its contents. Use for requested file creation or edits, not a code block to copy. Relative paths only; no local filesystem access.',
+          'Create or replace a UTF-8 text file directly on the selected repository branch. Also works in an empty repository: the first file creates the first commit. Each call commits the file and verifies its contents. Use for requested file creation or edits, not a code block to copy. Relative paths only; no local filesystem access.',
         requestBody: {
           required: true,
           content: {
@@ -49,7 +49,8 @@ export const githubWorkspaceOpenApi = (title: string): Record<string, unknown> =
       get: {
         operationId: 'list_files',
         summary: 'List repository files',
-        description: 'List files and directories in the active GitHub repository.',
+        description:
+          'List files and directories in the active GitHub repository. An empty root listing is a valid new repository; use write_file to create its first file.',
         parameters: [
           {
             name: 'directory',

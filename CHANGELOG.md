@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.34] - 2026-09-17
+
+### Fixed
+
+- Recognize newly created GitHub repositories without a first commit as valid empty
+  Cloud workspaces, instead of showing a terminal connection error for GitHub's 404.
+- Confirm repository identity, default branch and absence of branches before treating
+  an error as an empty root. Preserve missing-path, permission and API failures.
+- Keep Preview hidden until HTML exists; invalidate the empty state after the first
+  file write. Do not create placeholder files or commits just by opening a repository.
+- Clarify to the model that write_file can create the first file and commit.
+
+### Tests
+
+- Exercise empty-root discovery, first verified commit, refreshed file listing and
+  preview availability through the real Cloud HTTP server with simulated GitHub.
+- Cover inaccessible repositories, wrong branches, API failures and external first commits.
+
 ## [0.0.20-services.33] - 2026-09-17
 
 ### Fixed

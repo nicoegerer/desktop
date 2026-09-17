@@ -14,6 +14,7 @@ import {
   toFileEntries
 } from '../../shared/services/github-contents'
 import { githubWorkspaceOpenApi } from '../../shared/services/github-workspace-openapi'
+import { hasUnbornDefaultBranch } from '../../shared/services/github-empty'
 import {
   GithubWorkspaceWriter,
   githubContentsPath,
@@ -102,8 +103,12 @@ const githubGet = async (path: string): Promise<unknown> => {
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.payload
 
   const response = await githubRequest(path)
-  if (response.status === 404) throw Object.assign(new Error('Not found'), { status: 404 })
-  if (!response.ok) throw new Error(`GitHub request failed with status ${response.status}`)
+  if (!response.ok) {
+    await response.body?.cancel()
+    throw Object.assign(new Error(`GitHub request failed with status ${response.status}`), {
+      status: response.status
+    })
+  }
 
   const payload = await response.json()
   cache.set(path, { at: Date.now(), payload })
@@ -114,7 +119,22 @@ const contentsUrl = (mount: Mount, path: string): string =>
   githubContentsPath(mount, path) + `?ref=${encodeURIComponent(mount.branch)}`
 
 const listDirectory = async (mount: Mount, path: string): Promise<unknown> => {
-  const payload = await githubGet(contentsUrl(mount, path))
+  let payload: unknown
+  try {
+    payload = await githubGet(contentsUrl(mount, path))
+  } catch (error) {
+    const status = (error as { status?: number }).status
+    if (
+      !path &&
+      (status === 404 || status === 409) &&
+      (await hasUnbornDefaultBranch(mount, githubRequest))
+    ) {
+      // A newly created repository has no branch/Contents until the first commit.
+      // Never cache this fallback: the first file may be added outside the app.
+      return { dir: '/', entries: [] }
+    }
+    throw error
+  }
   if (!Array.isArray(payload)) throw Object.assign(new Error('Not a directory'), { status: 404 })
   return { dir: listingDir(path), entries: toFileEntries(payload) }
 }
@@ -235,7 +255,8 @@ const handle = async (
         info:
           `GitHub repository ${mount.repoFullName} on branch ${mount.branch}. ` +
           'Use write_file to create or replace files directly on this branch; each write ' +
-          'creates a verified commit. There is no local checkout and no shell.'
+          'creates a verified commit. An empty repository is ready for its first file; ' +
+          'write_file creates its first commit. There is no local checkout and no shell.'
       })
       return
     }

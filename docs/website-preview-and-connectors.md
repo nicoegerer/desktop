@@ -12,6 +12,15 @@ The desktop applies a source-map-verified, column-preserving compatibility fix t
 
 The preview serves workspace HTML, CSS, JavaScript, images, fonts and media, locally or from GitHub. It is not a development server: server-side apps, external APIs/CDNs, forms, workers and embedded external pages are deliberately blocked. Keep the static assets in the selected workspace. The preview never receives connector credentials or the Electron API. Cloud reads use immutable, size-bounded Git blobs and verify their hashes; symlinks, submodules and incomplete Git trees are not served.
 
+### New empty Cloud repositories
+
+A GitHub repository without a first commit is a valid empty workspace. Its root
+directory displays no files rather than a connection error. The model can use
+`write_file` to create the first requested file and commit; opening the repository
+never creates a README, placeholder or commit on its own. Preview stays hidden until
+an HTML entry exists. Missing permissions, deleted repositories, wrong branches and
+missing subdirectories are not treated as empty repositories.
+
 ### Security boundary
 
 - A trusted desktop IPC call supplies a registered workspace terminal ID, never an arbitrary renderer path.
