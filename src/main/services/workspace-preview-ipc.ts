@@ -3,13 +3,20 @@ import type {
   WorkspacePreviewRequest,
   WorkspacePreviewResult
 } from '../../shared/workspace-preview'
+import type { WorkspacePreviewSource } from './workspace-preview-source'
 
 type PreviewFailure = Extract<WorkspacePreviewResult, { ok: false }>
 type PreviewTerminal = { id: string; cwd: string }
 
 interface PreviewManager {
-  inspect(workspacePath: string): Promise<{ available: boolean; entryPath?: string }>
-  open(request: WorkspacePreviewRequest): Promise<WorkspacePreviewInfo>
+  inspect(
+    workspacePath: string,
+    source?: WorkspacePreviewSource
+  ): Promise<{ available: boolean; entryPath?: string }>
+  open(
+    request: WorkspacePreviewRequest,
+    source?: WorkspacePreviewSource
+  ): Promise<WorkspacePreviewInfo>
   close(id: string): Promise<void>
   closeAll(): Promise<void>
   getActive(): WorkspacePreviewInfo | null
@@ -18,6 +25,7 @@ interface PreviewManager {
 interface PreviewIpcOptions {
   manager: PreviewManager
   listTerminals: () => readonly PreviewTerminal[]
+  getRemoteSource?: (terminalId: string, fresh: boolean) => WorkspacePreviewSource | undefined
   isTrustedSender: (event: unknown) => boolean
   describeError: (cause: unknown) => PreviewFailure
 }
@@ -34,7 +42,7 @@ export interface WorkspacePreviewHandlers {
 const invalidWorkspace = (): PreviewFailure => ({
   ok: false,
   code: 'INVALID_WORKSPACE',
-  error: 'Select an available local workspace folder first.'
+  error: 'Select an available workspace first.'
 })
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -56,7 +64,10 @@ export const createWorkspacePreviewHandlers = (
       if (!options.isTrustedSender(event) || !isRecord(request)) return { available: false }
       const terminal = options.listTerminals().find((entry) => entry.id === request.terminalId)
       if (!terminal) return { available: false }
-      const result = await options.manager.inspect(terminal.cwd)
+      const result = await options.manager.inspect(
+        terminal.cwd,
+        options.getRemoteSource?.(terminal.id, false)
+      )
       return options
         .listTerminals()
         .some((entry) => entry.id === terminal.id && entry.cwd === terminal.cwd)
@@ -74,10 +85,13 @@ export const createWorkspacePreviewHandlers = (
       }
       terminalId = terminal.id
       try {
-        const preview = await options.manager.open({
-          workspacePath: terminal.cwd,
-          ...(request.entryPath !== undefined ? { entryPath: request.entryPath } : {})
-        })
+        const preview = await options.manager.open(
+          {
+            workspacePath: terminal.cwd,
+            ...(request.entryPath !== undefined ? { entryPath: request.entryPath } : {})
+          },
+          options.getRemoteSource?.(terminal.id, true)
+        )
         // The folder may have been released while the server was starting.
         const registered = options
           .listTerminals()

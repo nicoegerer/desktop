@@ -29,10 +29,10 @@ test('workspace switching never reloads the embedded page', () => {
   assert.ok(!script().includes('location.reload'))
 })
 
-test('website preview is tied to the current local selection and invalidated before switching', () => {
+test('website preview supports the current local or cloud selection and is invalidated before switching', () => {
   const source = script()
   assert.ok(source.includes("ask('workspacePreviewShow', data)"))
-  assert.ok(source.includes("value.mode === 'local'"))
+  assert.ok(source.includes("['local', 'cloud'].includes(value.mode)"))
   assert.ok(source.includes('reportPreviewState(true);'))
   assert.ok(source.includes("ask('workspacePreviewState', data)"))
   assert.ok(source.includes("ask('workspacePreviewInspect'"))

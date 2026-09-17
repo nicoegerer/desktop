@@ -106,7 +106,7 @@ export function createWorkspacePreviewTab(
       checking = false
       checkedAt = 0
     }
-    const eligible = value.mode === 'local' && !!value.terminalId && !value.pending
+    const eligible = ['local', 'cloud'].includes(value.mode) && !!value.terminalId && !value.pending
     if (eligible && !checking && Date.now() - checkedAt > 3000) {
       checking = true
       checkedAt = Date.now()

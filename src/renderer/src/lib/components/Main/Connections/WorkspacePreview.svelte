@@ -142,7 +142,8 @@
       </p>{/if}
   </div>
   <p class="px-4 py-2 text-[11px] opacity-60 border-t border-black/10 dark:border-white/10">
-    Lokal · HTML, CSS und JavaScript. Externe Verbindungen und Formulare sind gesperrt.
+    HTML, CSS und JavaScript aus deinem Arbeitsbereich. Externe Verbindungen und Formulare sind
+    gesperrt.
   </p>
 </aside>
 

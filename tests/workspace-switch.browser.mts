@@ -210,6 +210,14 @@ test(
         if(preview.getAttribute('aria-pressed')!=='true')throw new Error('Preview not selected');
         preview.previousElementSibling.click();if(preview.getAttribute('aria-pressed')!=='false')throw new Error('Files did not close preview');
         checks.push('Preview beside Files, tab switching works');
+        selection={...selection,terminalId:'desktop-gh-fixture',chatKey:'cloud-chat',mode:'cloud'};tab.update(selection);
+        await waitFor(()=>document.querySelector('[data-desktop-preview-tab]'),'Cloud HTML has no preview tab');
+        const cloudPreview=document.querySelector('[data-desktop-preview-tab]');cloudPreview.click();await delay(100);
+        if(cloudPreview.getAttribute('aria-pressed')!=='true')throw new Error('Cloud preview did not open');
+        selection={...selection,pending:true};tab.update(selection);
+        if(document.querySelector('[data-desktop-preview-tab]'))throw new Error('Cloud switch kept stale preview');
+        selection={...selection,pending:false};tab.update(selection);
+        checks.push('Cloud preview opens and clears while switching');
         available=false;selection={...selection,chatKey:'no-preview'};tab.update(selection);await delay(100);
         if(document.querySelector('[data-desktop-preview-tab]'))throw new Error('Unavailable preview was not hidden');checks.push('Unavailable preview hidden');
         available=true;await choose('desktop-first');await waitFor(()=>text().includes('first.html'),'Final folder failed');

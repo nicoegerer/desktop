@@ -99,7 +99,9 @@ import {
 } from '../shared/workspace-preview'
 import {
   configureGithubFs,
+  getGithubPreviewSource,
   listGithubMounts,
+  listGithubPreviewWorkspaces,
   mountGithubRepo,
   stopGithubFs,
   unmountGithubRepos
@@ -133,7 +135,8 @@ import { existsSync, writeFileSync, unlinkSync } from 'fs'
 const workspacePreviewManager = new WorkspacePreviewManager()
 const workspacePreview = createWorkspacePreviewHandlers({
   manager: workspacePreviewManager,
-  listTerminals: listWorkspaceTerminals,
+  listTerminals: () => [...listWorkspaceTerminals(), ...listGithubPreviewWorkspaces()],
+  getRemoteSource: getGithubPreviewSource,
   // Generated pages have no IPC bridge; only the desktop's own main frame may request previews.
   isTrustedSender: (event) =>
     Boolean(
@@ -2198,7 +2201,15 @@ if (!gotTheLock) {
         if (revision !== workspaceKeepRevision) return { ok: true, ids: workspaceRegistrationIds() }
         const serviceCwd = config.openTerminal?.enabled ? config.openTerminal?.cwd : ''
         if (serviceCwd) wanted.add(workspaceTerminalId(serviceCwd))
+        const previousMounts = listGithubMounts()
         const unmounted = unmountGithubRepos(wanted)
+        if (unmounted) {
+          for (const mount of previousMounts) {
+            if (revision !== workspaceKeepRevision) break
+            if (!listGithubMounts().some((entry) => entry.id === mount.id))
+              await workspacePreview.releaseTerminal(mount.id)
+          }
+        }
         const stopped: string[] = []
         for (const terminal of listWorkspaceTerminals()) {
           if (revision !== workspaceKeepRevision) break

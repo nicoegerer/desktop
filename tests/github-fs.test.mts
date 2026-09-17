@@ -3,6 +3,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { build } from 'esbuild'
+import { cloudFixture } from './helpers/github-preview-fixture.mts'
+import { WorkspacePreviewManager } from '../src/main/services/workspace-preview.ts'
 
 test('the authenticated cloud HTTP tool creates, verifies, lists and reads a scoped GitHub file', async () => {
   // Bundle the real server; only Electron's outbound GitHub transport and logging
@@ -16,12 +18,22 @@ test('the authenticated cloud HTTP tool creates, verifies, lists and reads a sco
     external: ['electron', 'electron-log']
   })
   const files = new Map<string, string>()
+  const previewTransport = cloudFixture(
+    {},
+    { repoFullName: 'example/cloud-site', branch: 'feature/site' }
+  )
+  const previewManager = new WorkspacePreviewManager()
   const outbound: { method: string; url: URL; body?: any }[] = []
   const sha = 'a'.repeat(40),
     commit = 'b'.repeat(40)
   const fakeGithub = async (input: string, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(input)
     assert.equal(url.origin, 'https://api.github.com')
+    if (url.pathname.startsWith('/repos/example/cloud-site/git/')) {
+      previewTransport.files.clear()
+      for (const [name, content] of files) previewTransport.files.set(name, Buffer.from(content))
+      return previewTransport.request(url.pathname + url.search, init)
+    }
     assert.ok(url.pathname.startsWith('/repos/example/cloud-site/contents/'))
     const name = decodeURIComponent(url.pathname.split('/contents/')[1])
     const method = init.method ?? 'GET'
@@ -72,6 +84,14 @@ test('the authenticated cloud HTTP tool creates, verifies, lists and reads a sco
       branch: 'feature/site'
     })
     const headers = { Authorization: 'Bearer ' + mount.apiKey, 'Content-Type': 'application/json' }
+    assert.equal(server.getGithubPreviewSource('unregistered'), undefined)
+    const emptyPreviewSource = server.getGithubPreviewSource(mount.id)
+    assert.deepEqual(await previewManager.inspect(emptyPreviewSource.root, emptyPreviewSource), {
+      available: false
+    })
+    assert.deepEqual(server.listGithubPreviewWorkspaces(), [
+      { id: mount.id, cwd: emptyPreviewSource.root }
+    ])
     const request = (route: string, init: RequestInit = {}) =>
       fetch(mount.url + route, { ...init, headers: { ...headers, ...init.headers } })
     assert.equal(
@@ -105,6 +125,26 @@ test('the authenticated cloud HTTP tool creates, verifies, lists and reads a sco
     assert.equal(saved.status, 200)
     assert.equal((await saved.json()).verified, true)
     assert.equal(files.get('index.html'), content)
+    const previewSource = server.getGithubPreviewSource(mount.id)
+    assert.notEqual(previewSource, emptyPreviewSource, 'file writes invalidate availability cache')
+    assert.equal(server.getGithubPreviewSource(mount.id), previewSource)
+    assert.notEqual(
+      server.getGithubPreviewSource(mount.id, true),
+      previewSource,
+      'reload resolves a fresh branch snapshot'
+    )
+    assert.deepEqual(await previewManager.inspect(previewSource.root, previewSource), {
+      available: true,
+      entryPath: 'index.html'
+    })
+    const preview = await previewManager.open({ workspacePath: previewSource.root }, previewSource)
+    assert.equal(await (await fetch(preview.url)).text(), content)
+    await server.mountGithubRepo({ repoFullName: 'example/cloud-site', branch: 'feature/site' })
+    assert.equal(
+      previewSource.isActive(),
+      true,
+      're-registering the same mount keeps its open preview valid'
+    )
     const listed = await (await request('/files/list?directory=/')).json()
     assert.deepEqual(
       listed.entries.map((entry: any) => entry.name),
@@ -116,8 +156,11 @@ test('the authenticated cloud HTTP tool creates, verifies, lists and reads a sco
     assert.equal(outbound.filter((call) => call.method === 'PUT').length, 1)
     assert.equal((await request('/execute', { method: 'POST', body: '{}' })).status, 405)
     assert.equal(server.unmountGithubRepos(new Set()), 1)
+    assert.equal(previewSource.isActive(), false)
+    assert.equal((await fetch(preview.url)).status, 403)
     assert.equal((await request('/files/read?path=index.html')).status, 404)
   } finally {
+    await previewManager.closeAll()
     await server.stopGithubFs()
   }
 })

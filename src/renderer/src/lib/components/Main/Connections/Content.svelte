@@ -308,7 +308,7 @@
                   view === 'connected' &&
                   activeConnectionId === 'local' &&
                   !workspaceState.pending &&
-                  workspaceState.mode === 'local' &&
+                  ['local', 'cloud'].includes(workspaceState.mode) &&
                   requestData.terminalId === workspaceState.terminalId &&
                   requestData.chatKey === workspaceState.chatKey &&
                   typeof requestData.entryPath === 'string' &&

@@ -98,4 +98,4 @@ export const getWorkspacePreviewRequestHeaders = (
 }
 
 export const WORKSPACE_PREVIEW_LIMITATION =
-  'Local HTML, CSS, JavaScript, images, fonts and media only. External connections, forms and server-side applications are blocked.'
+  'Workspace HTML, CSS, JavaScript, images, fonts and media only. External connections, forms and server-side applications are blocked.'

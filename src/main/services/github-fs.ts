@@ -3,6 +3,8 @@ import http from 'http'
 
 import { net as electronNet } from 'electron'
 import log from 'electron-log'
+import { createGithubPreviewSource, githubPreviewRoot } from './github-preview'
+import type { WorkspacePreviewSource } from './workspace-preview-source'
 
 import {
   isBinary,
@@ -59,6 +61,7 @@ let apiKey = ''
 let tokenResolver: () => string | null = () => null
 const mounts = new Map<string, Mount>()
 const cache = new Map<string, CacheEntry>()
+const previewSources = new Map<string, { at: number; source: WorkspacePreviewSource }>()
 const githubRequest = async (path: string, init: RequestInit = {}): Promise<Response> => {
   const token = tokenResolver()
   if (!token)
@@ -209,6 +212,7 @@ const handle = async (
       try {
         send(response, 200, await writer.write(mount, body))
       } finally {
+        previewSources.delete(mount.slug)
         // Also invalidate after an uncertain write; never show stale files as proof.
         for (const key of cache.keys()) {
           if (key.startsWith('/repos/' + mount.repoFullName + '/contents/')) cache.delete(key)
@@ -326,7 +330,7 @@ export const mountGithubRepo = async (repo: GithubRepoRef): Promise<GithubMountR
   validateGithubScope(repo)
   await ensureServer()
   const slug = githubMountSlug(repo)
-  mounts.set(slug, { ...repo, slug })
+  if (!mounts.has(slug)) mounts.set(slug, { ...repo, slug })
   return {
     id: githubTerminalId(repo),
     name: repo.repoFullName,
@@ -343,11 +347,36 @@ export const listGithubMounts = (): GithubMountResult[] =>
     apiKey
   }))
 
+export const listGithubPreviewWorkspaces = (): { id: string; cwd: string }[] =>
+  [...mounts.values()].map((mount) => ({
+    id: githubTerminalId(mount),
+    cwd: githubPreviewRoot(mount)
+  }))
+
+/** Only a currently registered repository can become a preview source. */
+export const getGithubPreviewSource = (
+  terminalId: string,
+  fresh = false
+): WorkspacePreviewSource | undefined => {
+  const mount = [...mounts.values()].find((entry) => githubTerminalId(entry) === terminalId)
+  if (!mount) return undefined
+  const cached = previewSources.get(mount.slug)
+  if (!fresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.source
+  const source = createGithubPreviewSource(
+    mount,
+    githubRequest,
+    () => mounts.get(mount.slug) === mount && !!tokenResolver()
+  )
+  previewSources.set(mount.slug, { at: Date.now(), source })
+  return source
+}
+
 export const unmountGithubRepos = (keep: Set<string>): number => {
   let removed = 0
   for (const [slug, mount] of [...mounts.entries()]) {
     if (keep.has(githubTerminalId(mount)) || writer.isBusy(mount)) continue
     mounts.delete(slug)
+    previewSources.delete(slug)
     removed++
   }
   return removed
@@ -355,6 +384,7 @@ export const unmountGithubRepos = (keep: Set<string>): number => {
 
 export const stopGithubFs = async (): Promise<void> => {
   mounts.clear()
+  previewSources.clear()
   cache.clear()
   if (!server) return
   await new Promise<void>((resolve) => server?.close(() => resolve()))

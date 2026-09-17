@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.33] - 2026-09-17
+
+### Fixed
+
+- Enable the conditional Preview tab for Cloud repositories, next to Controls and Files.
+  Load HTML and linked CSS, JavaScript, images and fonts directly from the selected GitHub
+  repository and branch, without a local checkout or a copy under OpenWebUI Workspaces.
+- Pin each preview to one Git tree so concurrent edits cannot mix asset revisions. Reload
+  resolves the branch again. Workspace switches and mount removal retire the old preview.
+- Keep preview content isolated from credentials, the desktop bridge and external services;
+  reject symlinks, submodules, hidden paths, oversized files and incomplete Git trees.
+
+### Tests
+
+- Add Cloud HTTP, IPC scope, asset integrity, reload and lifecycle regressions.
+- Exercise both local and Cloud websites in the real Chromium preview regression and
+  Cloud tab availability/switching in the shipped Open WebUI component test.
+
 ## [0.0.20-services.32] - 2026-09-08
 
 ### Fixed

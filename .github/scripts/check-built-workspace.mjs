@@ -92,6 +92,7 @@ const previewFactory = bundle.slice(previewStart, previewEnd)
 assert.doesNotThrow(() => new Function(`return (${previewFactory})`))
 assert.ok(previewFactory.includes('workspacePreviewInspect'))
 assert.ok(previewFactory.includes('workspacePreviewShow'))
+assert.match(previewFactory, /["']cloud["']/, 'Cloud preview eligibility must survive bundling')
 assert.ok(previewFactory.includes('panel.files.after(button)'))
 console.log(
   'Shipped renderer verified: self-contained rewriter and store bridge, selected filesystem first, stale preview cleared'

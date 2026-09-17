@@ -3,6 +3,7 @@ import { constants } from 'node:fs'
 import { lstat, open, opendir, realpath, stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
+import type { WorkspacePreviewSource } from './workspace-preview-source'
 
 import type {
   WorkspacePreviewErrorCode,
@@ -133,6 +134,10 @@ const resolveFile = async (root: string, relative: string): Promise<ResolvedFile
 
 const errorStatus = (error: unknown): number => {
   if (error instanceof WorkspacePreviewError) return 403
+  if (error && typeof error === 'object' && 'status' in error) {
+    if (error.status === 404) return 404
+    if (error.status === 401 || error.status === 403) return 403
+  }
   if (typeof error === 'object' && error !== null && 'code' in error) {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return 404
     if (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'ELOOP') return 403
@@ -164,6 +169,21 @@ interface PreviewSession {
   active: boolean
 }
 
+const resolveSourceFile = async (
+  source: WorkspacePreviewSource,
+  relative: string
+): Promise<{ relativePath: string; mimeType: string }> => {
+  if (!source.isActive()) throw unsafePath()
+  let relativePath = pathSegments(relative).join('/')
+  const files = await source.listFiles()
+  if (!files.includes(relativePath))
+    relativePath = [relativePath, 'index.html'].filter(Boolean).join('/')
+  if (!files.includes(relativePath)) throw Object.assign(new Error('Not found'), { status: 404 })
+  const mimeType = MIME_TYPES[path.posix.extname(relativePath).toLowerCase()]
+  if (!mimeType) throw unsafePath()
+  return { relativePath, mimeType }
+}
+
 /**
  * One active static preview. Retired ports are never reused during this manager's
  * lifetime: an old document's same-origin Referer must not unlock a new workspace.
@@ -179,8 +199,30 @@ export class WorkspacePreviewManager {
   }
 
   /** Read-only availability probe. Does not start a server or retire an open preview. */
-  async inspect(workspacePath: string): Promise<{ available: boolean; entryPath?: string }> {
+  async inspect(
+    workspacePath: string,
+    source?: WorkspacePreviewSource
+  ): Promise<{ available: boolean; entryPath?: string }> {
     try {
+      if (source) {
+        if (source.root !== workspacePath || !source.isActive()) return { available: false }
+        const rank = (name: string): number =>
+          name === 'index.html' ? -2 : name === 'index.htm' ? -1 : name.split('/').length
+        const candidates = (await source.listFiles())
+          .filter((name) => /\.html?$/i.test(name))
+          .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+        for (const name of candidates) {
+          try {
+            const file = await resolveSourceFile(source, name)
+            return source.isActive()
+              ? { available: true, entryPath: file.relativePath }
+              : { available: false }
+          } catch {
+            /* Try the next safe HTML file. */
+          }
+        }
+        return { available: false }
+      }
       if (!path.isAbsolute(workspacePath)) return { available: false }
       const root = await realpath(workspacePath)
       if (path.parse(root).root === root || !(await stat(root)).isDirectory())
@@ -207,12 +249,15 @@ export class WorkspacePreviewManager {
         }
       }
     } catch {
-      /* Missing, inaccessible and cloud workspaces have no preview. */
+      /* Missing or inaccessible workspaces have no preview. */
     }
     return { available: false }
   }
 
-  async open(request: WorkspacePreviewRequest): Promise<WorkspacePreviewInfo> {
+  async open(
+    request: WorkspacePreviewRequest,
+    source?: WorkspacePreviewSource
+  ): Promise<WorkspacePreviewInfo> {
     const revision = ++this.revision
     // Stop serving the old directory immediately, including if the new selection
     // fails validation. No stale page may keep reading a previous workspace.
@@ -223,14 +268,19 @@ export class WorkspacePreviewManager {
     if (
       !request ||
       typeof request.workspacePath !== 'string' ||
-      !path.isAbsolute(request.workspacePath)
+      (!source && !path.isAbsolute(request.workspacePath))
     ) {
-      throw new WorkspacePreviewError('INVALID_WORKSPACE', 'Select a local workspace folder first.')
+      throw new WorkspacePreviewError('INVALID_WORKSPACE', 'Select an available workspace first.')
     }
     let root: string
     try {
-      root = await realpath(request.workspacePath)
-      if (!(await stat(root)).isDirectory() || path.parse(root).root === root) throw new Error()
+      if (source) {
+        if (source.root !== request.workspacePath || !source.isActive()) throw new Error()
+        root = source.root
+      } else {
+        root = await realpath(request.workspacePath)
+        if (!(await stat(root)).isDirectory() || path.parse(root).root === root) throw new Error()
+      }
     } catch {
       throw new WorkspacePreviewError(
         'INVALID_WORKSPACE',
@@ -239,9 +289,11 @@ export class WorkspacePreviewManager {
     }
     const entryPath = request.entryPath ?? 'index.html'
     if (typeof entryPath !== 'string' || path.isAbsolute(entryPath)) throw unsafePath()
-    let entry: ResolvedFile
+    let entry: { relativePath: string; mimeType: string }
     try {
-      entry = await resolveFile(root, entryPath)
+      entry = source
+        ? await resolveSourceFile(source, entryPath)
+        : await resolveFile(root, entryPath)
     } catch (error) {
       if (error instanceof WorkspacePreviewError) throw error
       throw new WorkspacePreviewError(
@@ -255,8 +307,10 @@ export class WorkspacePreviewManager {
         'Choose an HTML file to preview this website.'
       )
     }
+    if (source && (await source.readFile(entry.relativePath)).length > MAX_FILE_BYTES)
+      throw unsafePath()
     const capability = randomBytes(32).toString('hex')
-    const session = await this.start(root, entry.relativePath, capability)
+    const session = await this.start(root, entry.relativePath, capability, source)
     if (revision !== this.revision) {
       await this.stop(session)
       throw new WorkspacePreviewError('SUPERSEDED', 'A newer workspace preview has been selected.')
@@ -292,7 +346,8 @@ export class WorkspacePreviewManager {
   private async start(
     root: string,
     entryPath: string,
-    capability: string
+    capability: string,
+    source?: WorkspacePreviewSource
   ): Promise<PreviewSession> {
     for (let attempt = 0; attempt < 32; attempt++) {
       const live: { session?: PreviewSession } = {}
@@ -303,7 +358,7 @@ export class WorkspacePreviewManager {
           response.end('This workspace preview is closed.')
           return
         }
-        void this.serve(session, root, capability, request, response)
+        void this.serve(session, root, capability, request, response, source)
       })
       server.requestTimeout = 10_000
       server.headersTimeout = 10_000
@@ -361,7 +416,8 @@ export class WorkspacePreviewManager {
     root: string,
     capability: string,
     request: IncomingMessage,
-    response: ServerResponse
+    response: ServerResponse,
+    source?: WorkspacePreviewSource
   ): Promise<void> {
     response.setHeader('Content-Security-Policy', WORKSPACE_PREVIEW_CSP)
     response.setHeader('X-Content-Type-Options', 'nosniff')
@@ -399,6 +455,15 @@ export class WorkspacePreviewManager {
       if (request.headers.origin === 'null')
         response.setHeader('Access-Control-Allow-Origin', 'null')
       const rawPath = request.url.split(/[?#]/, 1)[0]
+      if (source) {
+        const file = await resolveSourceFile(source, decodeURIComponent(rawPath))
+        const bytes = await source.readFile(file.relativePath)
+        if (!session.active || !source.isActive() || bytes.length > MAX_FILE_BYTES)
+          throw unsafePath()
+        response.writeHead(200, { 'Content-Type': file.mimeType, 'Content-Length': bytes.length })
+        response.end(request.method === 'HEAD' ? undefined : bytes)
+        return
+      }
       const file = await resolveFile(root, decodeURIComponent(rawPath))
       const metadata = await stat(file.filename)
       if (!metadata.isFile() || metadata.size > MAX_FILE_BYTES) throw unsafePath()

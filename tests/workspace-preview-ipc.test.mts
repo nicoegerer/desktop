@@ -99,7 +99,7 @@ test('availability uses registered local workspaces and never opens a server', a
   assert.equal(f.handlers.getActive(f.trusted).ok, true)
 })
 
-test('unknown, cloud, malformed and untrusted preview requests never reach the filesystem manager', async () => {
+test('unknown, unregistered cloud, malformed and untrusted preview requests never reach the filesystem manager', async () => {
   const f = fixture()
   for (const request of [
     null,
@@ -176,6 +176,11 @@ test('workspace release and lifecycle cleanup retire only the relevant preview',
 test('Electron wiring enforces main-frame IPC and subframe navigation confinement', async () => {
   const source = await readFile(new URL('../src/main/index.ts', import.meta.url), 'utf8')
   assert.match(source, /event\?\.sender === mainWindow\.webContents/)
+  assert.match(
+    source,
+    /listTerminals: \(\) => \[\.\.\.listWorkspaceTerminals\(\), \.\.\.listGithubPreviewWorkspaces\(\)\]/
+  )
+  assert.match(source, /getRemoteSource: getGithubPreviewSource/)
   assert.match(source, /event\.senderFrame === mainWindow\.webContents\.mainFrame/)
   assert.match(
     source,

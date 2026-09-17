@@ -2,15 +2,15 @@
 
 ## Preview a generated website
 
-Select the local workspace in the chat composer, then choose **Vorschau / Preview** beside **Steuerung / Controls** and **Dateien / Files** in the right sidebar. This tab is shown only when a safe local HTML entry exists in that workspace. `index.html` is preferred, followed by `index.htm` or another root-level HTML file. Availability refreshes after files are created or removed. The HTML field also accepts a workspace-relative file such as `pages/dashboard.html`. **Neu laden** reloads the files after an edit; **Breit / Mobil** changes the viewport width.
+Select a local folder or Cloud repository in the chat composer, then choose **Vorschau / Preview** beside **Steuerung / Controls** and **Dateien / Files** in the right sidebar. This tab is shown only when a safe HTML entry exists in that workspace. `index.html` is preferred, followed by `index.htm` or another root-level HTML file; Cloud repositories also discover nested HTML pages. Availability refreshes after files are created or removed. The HTML field accepts a workspace-relative file such as `pages/dashboard.html`. **Neu laden** reloads the files after an edit; **Breit / Mobil** changes the viewport width.
 
-Changing the workspace or conversation closes the old preview. No new chat is required to change workspaces. Cloud repository mounts are not local websites and have no preview tab. The preview occupies the existing sidebar body; its native Controls/Files tabs remain accessible. It does not change the selected workspace.
+Changing the workspace or conversation closes the old preview. No new chat is required to change workspaces. Cloud previews read the selected repository and branch through the existing GitHub connector (Contents read permission), without a local checkout. Each page and its assets use a single Git tree; **Neu laden** fetches the latest branch state. The preview occupies the existing sidebar body; its native Controls/Files tabs remain accessible. It does not change the selected workspace.
 
 Local workspace selection uses the exact directory chosen by the user. No checkout, copy, virtual alias or `OpenWebUI Workspaces` directory is created. Previously selected directories remain in Recently used, with their full original paths shown to distinguish identically named projects.
 
 The desktop applies a source-map-verified, column-preserving compatibility fix to the shipped Open WebUI FileNav initialization. Every mount reads the current terminal/session cwd instead of reusing a module-level path from a different draft workspace. The upstream asset is backed up beside the original as `.desktop-original`; upgrades validate the new runtime contract and reapply the fix. Only the local connection's HTTP asset cache is cleared, not cookies or chats.
 
-The preview serves local HTML, CSS, JavaScript, images, fonts and media. It is not a development server: server-side apps, external APIs/CDNs, forms, workers and embedded external pages are deliberately blocked. Use local assets for an offline static website. The preview never receives terminal credentials or the Electron API.
+The preview serves workspace HTML, CSS, JavaScript, images, fonts and media, locally or from GitHub. It is not a development server: server-side apps, external APIs/CDNs, forms, workers and embedded external pages are deliberately blocked. Keep the static assets in the selected workspace. The preview never receives connector credentials or the Electron API. Cloud reads use immutable, size-bounded Git blobs and verify their hashes; symlinks, submodules and incomplete Git trees are not served.
 
 ### Security boundary
 
