@@ -2263,7 +2263,10 @@ if (!gotTheLock) {
       async (_event, repo: { repoFullName: string; branch: string }) => {
         try {
           if (!repo?.repoFullName || !repo?.branch) throw new Error('A repository is required')
-          if (!getManagedServicesManager()?.getGithubAccessToken()) {
+          if (
+            !getManagedServicesManager()?.getGithubCliRequest() &&
+            !getManagedServicesManager()?.getGithubAccessToken()
+          ) {
             throw new Error(
               'Add the GitHub connector under Settings → Services & Connectors first.'
             )

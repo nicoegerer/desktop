@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.20-services.36] - 2026-09-17
+
+### Fixed
+
+- Accept the active GitHub CLI connection when opening a Cloud workspace, not only
+  when listing repositories. Remove the erroneous "Add the GitHub connector" rejection
+  for a connected CLI account; preserve token-mode access and fail-closed behavior.
+
+### Tests
+
+- Execute the actual repository-list and Cloud-selection IPC callbacks for both auth
+  modes, unavailable connections and incomplete selections. The CLI-selection case
+  reproduces the services.35 regression before the fix.
+
 ## [0.0.20-services.35] - 2026-09-17
 
 ### Added
